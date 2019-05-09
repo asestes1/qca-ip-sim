@@ -11,7 +11,7 @@ import gurobipy
 import matplotlib.pyplot
 
 
-def run_pricing_auction(flights, connections, move_costs, remove_costs, profiles,
+def run_pricing_auction(flights,connections, move_costs, remove_costs, profiles,
                         max_displacement, min_connect, max_connect, turnaround, max_delay,
                         alpha_f, beta_f, scenarios, airline_subauctions,
                         validate=False,

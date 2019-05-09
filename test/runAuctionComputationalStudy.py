@@ -102,7 +102,7 @@ else:
 
 scenarios = numpy.genfromtxt(scen_file, skip_header=1, delimiter=',')
 move_costs = auction_costs.make_move_costs(flights, gamma_f, 96, exponent)
-max_displacement = 8
+max_displacement = 4
 remove_costs = auction_costs.make_remove_costs(flights, max_displacement, 4 * 24, gamma_f, exponent)
 
 print("Running auction")
@@ -135,7 +135,7 @@ for b in [0.0625, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0]:
                                            alpha_f=alpha_f,
                                            beta_f=beta_f,
                                            scenarios=scenarios,
-                                           verbose=True,
+                                           verbose=False,
                                            validate=True,
                                            monopoly_benefit_func=monopoly_benefit_func,
                                            monopoly_constraint_rate=monopoly_constraint_rate,

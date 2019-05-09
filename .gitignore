@@ -1,3 +1,5 @@
+results/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -102,3 +104,8 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+.idea/misc.xml
+.idea/modules.xml
+.idea/qca-ip-sim.iml
+.idea/vcs.xml
+.idea/workspace.xml

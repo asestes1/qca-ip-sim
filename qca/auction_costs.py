@@ -1,19 +1,14 @@
 import itertools
 import numpy
 import gurobipy
+import typing
 from . import FIFO_QMODEL, FIFO_QMODEL_SPLIT
 from . import flight
 import math
+import attr
 
 
-def get_ip_value_by_airline(n_slots, flights, model):
-    """
-
-    :param n_slots:
-    :param flights:
-    :param model:
-    :return:
-    """
+def get_ip_value_by_airline(n_slots: int, flights: typing.Iterable[flight.Flight], model) -> typing.Dict[str, float]:
     auc_val_by_airline = {}
     for f in flights:
         if f.airline not in auc_val_by_airline:
@@ -29,7 +24,7 @@ def get_ip_value_by_airline(n_slots, flights, model):
                 if res_var is not None:
                     auc_val_by_airline[f.airline] += (res_var.getAttr(gurobipy.GRB.attr.Obj)
                                                       * res_var.getAttr(gurobipy.GRB.attr.X))
-    auc_val_by_airline['Total'] = sum(auc_val_by_airline.values())
+    auc_val_by_airline['TOTAL'] = sum(auc_val_by_airline.values())
     return auc_val_by_airline
 
 def get_aggregated_assignment_value(model, dict_function):
@@ -62,157 +57,135 @@ def get_num_flights_removed(model, flights):
                 if model.getVarByName('R' + str(f.flight_id)) is not None])
 
 
-"""
-Creates a map that stores the cost of removal for all the flights
-Arguments:
-flights - an iterable of flights
-max_displacement - number of time periods
-n_slots - integer
-gamma_f - dictionary. Keys: flights, values: gamma_f[f] gives gamma_f constant
-
-Returns:
-map. Key: flight id, value: map[flight_id] gives the removal cost of flight 
-"""
-
-
 def make_remove_costs(flights, max_displacement, n_slots, gamma_f, exponent):
+    """
+    Creates a map that stores the cost of removal for all the flights
+
+    :param flights - the flights in the auction
+    :param max_displacement - number of time periods
+    :param n_slots - integer
+    :param gamma_f - dictionary. Keys: flights, values: gamma_f[f] gives gamma_f constant
+    :returns map. Key: flight id, value: map[flight_id] gives the removal cost of flight
+    """
     return {f.flight_id: cost_remove(f, max_displacement, n_slots, gamma_f, exponent)
             for f in flights}
 
 
-"""
-Creates a map that stores the cost of delay for each flight at each time.
-flights - an iterable of flights
-max_delay - in minutes
-alpha_f,beta_f - dictionary. Keys: flights, values: alpha_f[f] gives alpha_f constant
-cancel_probs - array, number of scenarios by number of time periods
-delays - array, number of scenarios by number of time periods
-scenario_probs - array, number of scenarios
-
-Returns:
-map. Key: a pair (flight_id,time). Value: map[flight_id,time] is the delay cost
-     for that flight assigned to that time.
-"""
-
-
-def make_delay_costs(flights, max_delay, alpha_f, beta_f,
+def make_delay_costs(flights: typing.Iterable[flight.Flight], max_delay, alpha_f, beta_f,
                      cancel_probs, delays, scenario_probs, threshold=0):
+    """
+    Creates a map that stores the cost of delay for each flight at each time.
+    flights - an iterable of flights
+    max_delay - in minutes
+    alpha_f,beta_f - dictionary. Keys: flights, values: alpha_f[f] gives alpha_f constant
+    cancel_probs - array, number of scenarios by number of time periods
+    delays - array, number of scenarios by number of time periods
+    scenario_probs - array, number of scenarios
+
+    Returns:
+    map. Key: a pair (flight_id,time). Value: map[flight_id,time] is the delay cost
+         for that flight assigned to that time.
+    """
     values = {}
     n_slots = cancel_probs.shape[1]
     for f, t in itertools.product(flights, range(0, n_slots)):
         values[f.flight_id, t] = cost_congest(f, t, max_delay, alpha_f,
                                               beta_f, cancel_probs, delays,
                                               scenario_probs, threshold=threshold)
-    return values;
+    return values
 
 
-"""
-Makes a map of the schedule adjustment cost of assigning a flight to a slot
+def make_move_costs(flights: typing.Iterable[flight.Flight], gamma_f: typing.Dict[flight.Flight, float], n_slots: int,
+                    exponent: float):
+    """
+    Makes a map of the schedule adjustment cost of assigning a flight to a slot
 
-Arguments:
-flights - an iterable of flights
-n_slots - integer
-gamma_f - dictionary. Keys: flights, values: gamma_f[f] gives gamma_f constant
-max_delay - in minutes
-alpha_f,beta_f - similar to gamma_f
-cancel_probs - array, number of scenarios by number of time periods
-delays - array, number of scenarios by number of time periods
-scenario_probs - array, number of scenarios
+    :param flights - an iterable of flights
+    :param n_slots - the maximum number of slots that a flight can be moved
+    :param gamma_f - dictionary. Keys: flights, values: gamma_f[f] gives gamma_f constant for flight f
+    delays - array, number of scenarios by number of time periods
+    scenario_probs - array, number of scenarios
 
-Returns:
-map - Key: a pair (flight_id,time). Value: map[flight_id,time] is the cost
-     for that flight assigned to that time.
-"""
-
-
-def make_move_costs(flights, gamma_f, n_slots, exponent):
+    :returns map - Key: a pair (flight_id,time). Value: map[flight_id,time] is the cost
+         for that flight assigned to that time.
+    """
     values = {}
     for f, t in itertools.product(flights, range(0, n_slots)):
         values[f.flight_id, t] = cost_move(f, t, gamma_f, exponent)
-    return values;
-
-
-"""
-Calculate the cost of removing a flight.
-
-Arguments:
-f - the flights
-max_displacement - the max displacement of the flight in numbers of slots (int)
-n_slots - the number of possible time slots in the day (int)
-gamma_f - dictionary. Keys: flights, values: gamma_f[f] gives gamma_f constant
-
-Return:
-the cost of removing a flight (double).
-"""
+    return values
 
 
 def cost_remove(f, max_displacement, n_slots, gamma_f, exponent):
+    """
+    Calculate the cost of removing a flight.
+
+    Arguments:
+    f - the flights
+    max_displacement - the max displacement of the flight in numbers of slots (int)
+    n_slots - the number of possible time slots in the day (int)
+    gamma_f - dictionary. Keys: flights, values: gamma_f[f] gives gamma_f constant
+
+    Return:
+    the cost of removing a flight (double).
+    """
     earliest = max(f.slot_time - max_displacement, 0)
     latest = min(f.slot_time + max_displacement, n_slots - 1)
     return max(cost_move(f, earliest, gamma_f, exponent), cost_move(f, latest, gamma_f, exponent))
 
 
-"""
-Calculate the cost of delaying a flight.
+def cost_delay(f: flight.Flight, delay: int, alpha_f: typing.Dict[flight.Flight, float],
+               beta_f: typing.Dict[flight.Flight, float], threshold: int = 0) -> float:
+    """
+    Calculate the cost of delaying a flight.
 
-Arguments:
-f - the flights
-delay - the amount of delay that a flight receives
-alpha_f - dictionary. Keys: flights, values: alpha_f[f] gives alpha_f constant
-beta_f - dictionary. Keys: flights, values: beta_f[f] gives beta_f constant
+    Arguments:
+    :param f - the flights
+    :param delay - the amount of delay that a flight receives
+    :param alpha_f - dictionary. Keys: flights, values: alpha_f[f] gives alpha_f constant
+    :param beta_f - dictionary. Keys: flights, values: beta_f[f] gives beta_f constant
 
-Return:
-the cost of delaying the flight (double).
-"""
-
-
-def cost_delay(f, delay, alpha_f, beta_f, threshold=0):
-    if (delay < threshold):
+    :returns the cost of delaying the flight (float).
+    """
+    if delay < threshold:
         return 0
     else:
         return (alpha_f[f.flight_id] + beta_f[f.flight_id] * f.n_seats) * (delay - threshold)
-    return;
 
 
-"""
-Calculate the cost of cancelling a flight.
+def cost_cancel(f: flight.Flight, max_delay: int, alpha_f: typing.Dict[flight.Flight, float],
+                beta_f: typing.Dict[flight.Flight, float],
+                threshold: int = 0) -> float:
+    """
+    Calculate the cost of cancelling a flight.
 
-Arguments:
-f - the flights
-max_delay - the maximum amount of delay that a flight can receive
-alpha_f - dictionary. Keys: flights, values: alpha_f[f] gives alpha_f constant
-beta_f - dictionary. Keys: flights, values: beta_f[f] gives beta_f constant
+    :param f - the flights
+    :param max_delay - the maximum amount of delay that a flight can receive (in number of slots)
+    :param alpha_f - dictionary. Keys: flights, values: alpha_f[f] gives alpha_f constant
+    :param beta_f - dictionary. Keys: flights, values: beta_f[f] gives beta_f constant
 
-Return:
-the cost of cancelling the flight (double).
-"""
-
-
-def cost_cancel(f, max_delay, alpha_f, beta_f, threshold=0):
-    return cost_delay(f, max_delay, alpha_f, beta_f, threshold=threshold)  # -*- coding: utf-8 -*-
-
-
-"""
-Calculate the expected cost of congestion for a flight, given some capacity
-scenarios.
-
-Arguments:
-f - the flight
-t - the time slot
-max_delay - the maximum amount of delay that a flight can receive
-alpha_f - dictionary. Keys: flights, values: alpha_f[f] gives alpha_f constant
-beta_f - dictionary. Keys: flights, values: beta_f[f] gives beta_f constant
-cancel_probs - a matrix, cancel_probs[w,t] gives the probability that an 
-               airline would cancel a flight scheduled for the t time slot
-               scenario w
-scenario_probs - a vector, scenario_probs[w] gives the probability of scenario
-                 p occurring.
-Return:
-the cost of cancelling the flight (double).
-"""
+    :returns the cost of cancelling the flight (double).
+    """
+    return cost_delay(f, max_delay, alpha_f, beta_f, threshold=threshold)
 
 
 def cost_congest(f, t, max_delay, alpha_f, beta_f, cancel_probs, delays, scenario_probs, threshold=0):
+    """
+    Calculate the expected cost of congestion for a flight, given some capacity
+    scenarios.
+
+    :param f - the flight
+    :param t - the time slot
+    :param max_delay - the maximum amount of delay that a flight can receive
+    :param alpha_f - dictionary. Keys: flights, values: alpha_f[f] gives alpha_f constant
+    beta_f - dictionary. Keys: flights, values: beta_f[f] gives beta_f constant
+    cancel_probs - a matrix, cancel_probs[w,t] gives the probability that an
+                   airline would cancel a flight scheduled for the t time slot
+                   scenario w
+    scenario_probs - a vector, scenario_probs[w] gives the probability of scenario
+                     p occurring.
+    Return:
+    the cost of cancelling the flight (double).
+    """
     exp_value = 0
     for w, p in enumerate(scenario_probs):
         cancel_cost = cancel_probs[w, t] * cost_cancel(f, max_delay, alpha_f, beta_f, threshold=threshold)
