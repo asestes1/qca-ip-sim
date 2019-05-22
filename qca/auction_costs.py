@@ -5,7 +5,6 @@ import typing
 from . import FIFO_QMODEL, FIFO_QMODEL_SPLIT
 from . import flight
 import math
-import attr
 
 
 def get_ip_value_by_airline(n_slots: int, flights: typing.Iterable[flight.Flight], model) -> typing.Dict[str, float]:
@@ -26,6 +25,7 @@ def get_ip_value_by_airline(n_slots: int, flights: typing.Iterable[flight.Flight
                                                       * res_var.getAttr(gurobipy.GRB.attr.X))
     auc_val_by_airline['TOTAL'] = sum(auc_val_by_airline.values())
     return auc_val_by_airline
+
 
 def get_aggregated_assignment_value(model, dict_function):
     return sum([dict_function[f, t] *

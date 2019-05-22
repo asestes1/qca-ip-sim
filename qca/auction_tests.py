@@ -11,14 +11,15 @@ import gurobipy
 import matplotlib.pyplot
 
 
-def run_pricing_auction(flights,connections, move_costs, remove_costs, profiles,
+def run_pricing_auction(flights, connections, move_costs, remove_costs, profiles,
                         max_displacement, min_connect, max_connect, turnaround, max_delay,
                         alpha_f, beta_f, scenarios, airline_subauctions,
                         validate=False,
                         peak_time_range=None, monopoly_benefit_func=None, monopoly_constraint_rate=None,
                         verbose=False,
                         warm_model=None, air_rem_vars=None,
-                        air_res_vars=None, num_iterations=2,
+                        air_res_vars=None,
+                        max_iterations=10,
                         delay_threshold=0):
     """
     :param flights:
@@ -98,7 +99,8 @@ def run_pricing_auction(flights,connections, move_costs, remove_costs, profiles,
 
         # Go through each run
         for r in runs:
-            print('Profile: ' + str(p[0]) + ', Run: ' + str(r))
+
+            # print('Profile: ' + str(p[0]) + ', Run: ' + str(r))
             # If this is not the full auction, then we remove an airline
             air_constr = None
             if r != 'FULL_AUCTION':
@@ -118,18 +120,27 @@ def run_pricing_auction(flights,connections, move_costs, remove_costs, profiles,
                                                    move_costs, monopoly_benefit_func, peak_time_range)
 
             delay_estimates[tuple(p), r] = []
-            for j in range(0, num_iterations):
+            iterations = 0
+            converged = False
+            previous_assignment = None
+            while not converged:
+                iterations += 1
                 # Find an estimated schedule
                 model.optimize()
                 new_flights = auction_model.get_new_flight_schedule(flights, n_slots, model)
+                if new_flights == previous_assignment:
+                    converged = True
+                    print("NUM ITERATIONS: ", iterations)
+                elif iterations >= max_iterations:
+                    converged = True
+                    print("ITERATIONS HAVE REACHED MAXIMUM: ", iterations, r)
 
                 # Calculate the expected delays in the estimated schedule
                 delay_results = auction_costs.get_queue_delays(scenarios, new_flights, n_slots)
                 delay_estimates[tuple(p), r].append(sum(sum(p[i] * delay_results['avg_delay'][i, f.slot_time]
                                                             for i in range(0, len(delay_results['prob'])))
                                                         for f in new_flights))
-                new_delay_costs = None
-                if j < num_iterations - 1:
+                if not converged:
                     new_delay_costs = auction_costs.make_delay_costs(flights, max_delay, alpha_f, beta_f,
                                                                      delay_results['p_canc'],
                                                                      delay_results['avg_delay'],
@@ -143,12 +154,14 @@ def run_pricing_auction(flights,connections, move_costs, remove_costs, profiles,
                     monopoly_estimates[tuple(p), r].append(
                         auction_costs.get_monopoly_ub(market_shares, new_flights, remove_costs,
                                                       peak_time_range, monopoly_benefit_func)['Total'])
-                    if j < num_iterations - 1:
-                        auction_model.reset_monopoly_costs(model, market_shares, flights, remove_costs,
-                                                           new_delay_costs,
-                                                           move_costs,
-                                                           monopoly_benefit_func,
-                                                           peak_time_range)
+
+                if not converged:
+                    auction_model.reset_monopoly_costs(model, market_shares, flights, remove_costs,
+                                                       new_delay_costs,
+                                                       move_costs,
+                                                       monopoly_benefit_func,
+                                                       peak_time_range)
+                previous_assignment = new_flights
 
             if validate:
                 new_flights = auction_model.get_new_flight_schedule(flights, n_slots, model)
@@ -188,7 +201,7 @@ def price_auctions(flights, connections, move_costs, remove_costs, profiles,
                    airline_subauctions=None,
                    peak_time_range=None,
                    monopoly_benefit_func=None, monopoly_constraint_rate=None,
-                   verbose=False, validate=False, num_iterations=2,
+                   verbose=False, validate=False, max_iterations=2,
                    delay_threshold=0):
     """
     :param flights:
@@ -243,7 +256,7 @@ def price_auctions(flights, connections, move_costs, remove_costs, profiles,
                                   validate=validate,
                                   monopoly_benefit_func=monopoly_benefit_func,
                                   monopoly_constraint_rate=monopoly_constraint_rate,
-                                  peak_time_range=peak_time_range, num_iterations=num_iterations,
+                                  peak_time_range=peak_time_range, max_iterations=max_iterations,
                                   delay_threshold=delay_threshold)
 
     new_flights = results['best_schedules']['FULL_AUCTION']

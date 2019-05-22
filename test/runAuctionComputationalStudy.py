@@ -39,7 +39,7 @@ scen_file = os.path.join(data_folder, 'scenariosJFK.csv')
 # folder ='HighAgg_UncontMono_VaryBeta_AllSubs'
 # folder='VaryingBetaAllSubauctions'
 # folder = 'JOVaryBetaResults'
-folder = 'FixedProf19_NoAgg_UncMono_VaryBeta_AllSubs'
+folder = 'FixedProf25_NoAgg_UncMono_VaryBeta_AllSubs'
 results_directory = '../results/' + folder + '/'
 
 if not os.path.isdir(results_directory):
@@ -50,7 +50,7 @@ exponent = 2
 flights = flight.read_flights(oag_file, 'JFK',
                               pandas.to_datetime(year + '-' + month + '-' + day + '-'), 15)
 subauctions = 'all'
-# subauctions = 'none'
+#subauctions = 'none'
 g = 7.5
 gamma_f = {f.flight_id: g for f in flights}
 alpha_f = {f.flight_id: 0 for f in flights}
@@ -74,7 +74,7 @@ peak_time_range = range(62,70)
 # monopoly_constraint_rate = 0.4
 monopoly_constraint_rate = None
 
-profiles = [[19]*4*24]
+profiles = [[25]*4*24]
 #profiles = [[20] * 4 * 24, [18] * 4 * 24, [19] * 4 * 24, [20] * 4 * 24
 #    , [21] * 4 * 24, [22] * 4 * 24, [23] * 4 * 24, [24] * 4 * 24, [25.0] * 4 * 24,
 #            [26.0] * 4 * 24]
@@ -109,7 +109,7 @@ print("Running auction")
 print(numpy.log2([0.0625, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0]))
 
 # for b in [0.0625,0.125,0.25,0.5,1.0,2.0,4.0,8.0,16.0]:
-for b in [0.0625, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0]:
+for b in [0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0]:
     beta_f = {f.flight_id: b for f in flights}
     print("Beta_f: ", b)
     run_info_string = 'OD trial.\nScenarios file: ' + scen_file
@@ -140,7 +140,7 @@ for b in [0.0625, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0]:
                                            monopoly_benefit_func=monopoly_benefit_func,
                                            monopoly_constraint_rate=monopoly_constraint_rate,
                                            peak_time_range=peak_time_range,
-                                           num_iterations=3,
+                                           max_iterations=50,
                                            delay_threshold=0)
 
     results['run_info'] = run_info_string

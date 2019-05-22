@@ -6,8 +6,6 @@ Created on Thu Jul  7 22:42:29 2016
 """
 from __future__ import division
 import numpy as np
-import matplotlib.pyplot as plt
-
 
 
 class FIFO_QMODEL:

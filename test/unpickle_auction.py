@@ -51,7 +51,7 @@ flights = flight.read_flights(oag_file, 'JFK',
 # folder ='HighAgg_UncontMono_VaryBeta_AllSubs'
 # folder='VaryingBetaAllSubauctions'
 # folder = 'C:/Alex/Google Drive/Research Resources/auction results/JOVaryBetaResults'
-results_folder = '../results/FixedProf19_NoAgg_UncMono_VaryBeta_AllSubs'
+results_folder = '../results/FixedProf25_NoAgg_UncMono_VaryBeta_AllSubs'
 print(os.listdir(results_folder))
 
 print_summary = False

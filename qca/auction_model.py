@@ -1,10 +1,12 @@
-
 import gurobipy
 from . import auction_costs
 from . import flight
+import typing
+import gurobipy as grb
 
 
-def get_new_flight_schedule(flights, n_slots, ip_model):
+def get_new_flight_schedule(flights: typing.Iterable[flight.Flight], n_slots: int, ip_model: grb.Model) -> typing.Set[
+    flight.Flight]:
     new_flights = set()
     for f in flights:
         found = False
