@@ -49,8 +49,9 @@ max_delay = 120
 exponent = 2
 flights = flight.read_flights(oag_file, 'JFK',
                               pandas.to_datetime(year + '-' + month + '-' + day + '-'), 15)
-subauctions = 'all'
+#subauctions = 'all'
 #subauctions = 'none'
+subauctions=['UAL']
 g = 7.5
 gamma_f = {f.flight_id: g for f in flights}
 alpha_f = {f.flight_id: 0 for f in flights}
@@ -98,7 +99,8 @@ elif airline_aggregation == 'med':
 if subauctions == 'all':
     airline_subauctions = {f.airline for f in flights}
 else:
-    airline_subauctions = None
+    airline_subauctions = subauctions
+
 
 scenarios = numpy.genfromtxt(scen_file, skip_header=1, delimiter=',')
 move_costs = auction_costs.make_move_costs(flights, gamma_f, 96, exponent)
@@ -117,7 +119,7 @@ for b in [0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0]:
     run_info_string += '\nFlights File: ' + oag_file
     run_info_string += '\nParameters: monopoly benefits. Beta_f = ' + str(b) + ' for all flights.'
     run_info_string += ' Alpha_f = 0 for all flights. Gamma_f = ' + str(g) + ' for all flights. Profiles from 17-25. '
-    run_info_string += ' Airline subauctions run: ' + subauctions + '. '
+    run_info_string += ' Airline subauctions run: ' + str(subauctions) + '. '
     run_info_string += ' Airline aggregation level: ' + airline_aggregation + '. '
     run_info_string += 'See results["param_info"] for other parameters.'
 

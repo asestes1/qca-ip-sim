@@ -304,7 +304,7 @@ def get_monopoly_ub(market_shares, flights, remove_costs, peak_time_range, monop
     return value_by_flight
 
 
-def get_airline_market_shares(flights, peak_time_range, profile):
+def get_airline_market_shares(flights: typing.Iterable[flight.Flight], peak_time_range, profile) -> typing.Dict[str, float]:
     num_peak_slots = sum(profile[t] for t in peak_time_range)
     share_by_airline = {}
     for f in flights:
