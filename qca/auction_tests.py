@@ -99,7 +99,7 @@ def run_pricing_auction(flights, connections, move_costs, remove_costs, profiles
 
         # Go through each run
         for r in runs:
-
+            print(r)
             # print('Profile: ' + str(p[0]) + ', Run: ' + str(r))
             # If this is not the full auction, then we remove an airline
             air_constr = None
@@ -127,32 +127,24 @@ def run_pricing_auction(flights, connections, move_costs, remove_costs, profiles
                 iterations += 1
                 # Find an estimated schedule
                 model.optimize()
-                print(r, model.getAttr("ObjVal"))
                 new_flights = auction_model.get_new_flight_schedule(flights, n_slots, model)
                 try:
                     cycle_index = previous_assignments.index(new_flights)
-                    if cycle_index == len(previous_assignments)-1:
+                    if cycle_index == len(previous_assignments) - 1:
                         converged = True
-                        cycle = [new_flights]
                     else:
-                        cycle = previous_assignments[cycle_index:]
-                        previous_assignments = []
+                        raise RuntimeError("Error in running auction: Cycling on run " + str(r))
                 except ValueError:
-                    cycle = [new_flights]
+                    pass
 
                 # Calculate the expected delays in the estimated schedule
-                delay_results={'p_canc': 0, 'avg_delay':0, 'prob':0}
-                for my_flights in cycle:
-                    single_delay_results = auction_costs.get_queue_delays(scenarios, my_flights, n_slots)
-                    for elem in ['p_canc', 'avg_delay', 'prob']:
-                        delay_results[elem] += single_delay_results[elem]/len(cycle)
+                delay_results = auction_costs.get_queue_delays(scenarios, new_flights, n_slots)
                 delay_estimates[tuple(p), r].append(sum(sum(p[i] * delay_results['avg_delay'][i, f.slot_time]
                                                             for i in range(0, len(delay_results['prob'])))
                                                         for f in new_flights))
                 if iterations >= max_iterations:
                     converged = True
                     print("ITERATIONS HAVE REACHED MAXIMUM: ", iterations, r)
-
 
                 if not converged:
                     new_delay_costs = auction_costs.make_delay_costs(flights, max_delay, alpha_f, beta_f,
@@ -165,12 +157,7 @@ def run_pricing_auction(flights, connections, move_costs, remove_costs, profiles
                 # Reassign variable costs for the new estimated schedule
                 if monopoly_benefit_func is not None and peak_time_range is not None:
                     airlines = {f.airline for f in flights}
-                    market_shares = {a:0 for a in airlines}
-                    for new_flight_alloc in cycle:
-                        market_shares_alloc = auction_costs.get_airline_market_shares(new_flight_alloc, peak_time_range, p)
-                        for a in airlines:
-                            if a in market_shares_alloc:
-                                market_shares[a] += market_shares_alloc[a]/len(cycle)
+                    market_shares = auction_costs.get_airline_market_shares(new_flights, peak_time_range, p)
                     monopoly_estimates[tuple(p), r].append(
                         auction_costs.get_monopoly_ub(market_shares, new_flights, remove_costs,
                                                       peak_time_range, monopoly_benefit_func)['Total'])

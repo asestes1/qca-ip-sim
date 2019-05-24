@@ -25,7 +25,7 @@ day = '04'
 # airline_aggregation = 'high'
 # airline_aggregation = 'med'
 airline_aggregation = 'none'
-data_folder = os.path.abspath(os.path.join(os.path.join(os.path.join(__file__, os.pardir),os.pardir), 'resources'))
+data_folder = os.path.abspath(os.path.join(os.path.join(os.path.join(__file__, os.pardir), os.pardir), 'resources'))
 
 oag_file = os.path.join(data_folder, 'OAG-CSV-ID/OAG_JFK_' + year + '_' + month + '_ID.csv')
 connections_file = os.path.join(data_folder, 'Connections/Connection_' + year + '_' + month + '_' + day + '.p')
@@ -49,9 +49,9 @@ max_delay = 120
 exponent = 2
 flights = flight.read_flights(oag_file, 'JFK',
                               pandas.to_datetime(year + '-' + month + '-' + day + '-'), 15)
-#subauctions = 'all'
-#subauctions = 'none'
-subauctions=['UAL']
+subauctions = 'all'
+# subauctions = 'none'
+# subauctions=['UAL']
 g = 7.5
 gamma_f = {f.flight_id: g for f in flights}
 alpha_f = {f.flight_id: 0 for f in flights}
@@ -66,17 +66,16 @@ def typical_monopoly_func(x):
         return 2 * math.pow(4 / 3, 1.5) * (x - 0.25) ** 1.5
 
 
-#monopoly_benefit_func = None
+# monopoly_benefit_func = None
 monopoly_benefit_func = typical_monopoly_func
 
-
-peak_time_range = range(62,70)
+peak_time_range = range(62, 70)
 # peak_time_range = None
 # monopoly_constraint_rate = 0.4
 monopoly_constraint_rate = None
 
-profiles = [[25]*4*24]
-#profiles = [[20] * 4 * 24, [18] * 4 * 24, [19] * 4 * 24, [20] * 4 * 24
+profiles = [[22] * 4 * 24]
+# profiles = [[20] * 4 * 24, [18] * 4 * 24, [19] * 4 * 24, [20] * 4 * 24
 #    , [21] * 4 * 24, [22] * 4 * 24, [23] * 4 * 24, [24] * 4 * 24, [25.0] * 4 * 24,
 #            [26.0] * 4 * 24]
 
@@ -101,7 +100,6 @@ if subauctions == 'all':
 else:
     airline_subauctions = subauctions
 
-
 scenarios = numpy.genfromtxt(scen_file, skip_header=1, delimiter=',')
 move_costs = auction_costs.make_move_costs(flights, gamma_f, 96, exponent)
 max_displacement = 4
@@ -110,8 +108,8 @@ remove_costs = auction_costs.make_remove_costs(flights, max_displacement, 4 * 24
 print("Running auction")
 print(numpy.log2([0.0625, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0]))
 
-# for b in [0.0625,0.125,0.25,0.5,1.0,2.0,4.0,8.0,16.0]:
-for b in [0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0]:
+for b in [0.0625, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0]:
+    # for b in [0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0]:
     beta_f = {f.flight_id: b for f in flights}
     print("Beta_f: ", b)
     run_info_string = 'OD trial.\nScenarios file: ' + scen_file
