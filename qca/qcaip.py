@@ -1,29 +1,9 @@
 import gurobipy
-from . import auction_costs
-from . import flight
+from . import flightsched
 import typing
 import gurobipy as grb
-
-
-def get_new_flight_schedule(flights: typing.Iterable[flight.Flight], n_slots: int, ip_model: grb.Model) -> typing.Set[
-    flight.Flight]:
-    new_flights = set()
-    for f in flights:
-        found = False
-        for t in range(0, n_slots):
-            sched_var = ip_model.getVarByName('F' + str(f.flight_id) + 'T' + str(t))
-            if sched_var is not None and abs(sched_var.getAttr(gurobipy.GRB.attr.X) - 1.0) < 0.0001:
-                if not found:
-                    found = True
-                    new_flights.add(f.copy_reschedule(t))
-                else:
-                    print("Error: flight is double scheduled")
-
-        if not found:
-            remove_var = ip_model.getVarByName('R' + str(f.flight_id))
-            if remove_var is None or abs(remove_var.getAttr(gurobipy.GRB.attr.X)) < 0.000001:
-                print("Error: flight is neither scheduled nor removed")
-    return new_flights
+import attr
+import warnings
 
 
 def edit_profile_constr(model, profile, flights,
@@ -44,7 +24,10 @@ def edit_profile_constr(model, profile, flights,
     return
 
 
-def reset_delay_costs(model, delay_costs, move_costs, flights, n_slots):
+def reset_delay_costs(model: gurobipy.Model, delay_costs: typing.Mapping[typing.Tuple[int, int], float],
+                      move_costs: typing.Mapping[typing.Tuple[int, int], float],
+                      flights: typing.Iterable[flightsched.Flight],
+                      n_slots: int):
     for f in flights:
         for t in range(0, n_slots):
             next_reschedule_var = model.getVarByName('F' + str(f.flight_id) + 'T' + str(t))
@@ -60,8 +43,7 @@ def reset_monopoly_costs(model, market_shares, flights,
                          remove_costs, delay_costs, move_costs, monopoly_benefit_func,
                          peak_time_range):
     if monopoly_benefit_func is not None and peak_time_range is not None:
-        max_monop_by_flight = auction_costs.get_monopoly_ub(market_shares, flights, remove_costs, peak_time_range,
-                                                            monopoly_benefit_func)
+        max_monop_by_flight = get_monopoly_ub(market_shares, flights, remove_costs, monopoly_benefit_func)
         for f in flights:
             for t in peak_time_range:
                 move_var = model.getVarByName('F' + str(f.flight_id) + 'T' + str(t))
@@ -71,18 +53,6 @@ def reset_monopoly_costs(model, market_shares, flights,
         model.update()
 
 
-def fix_airline_vars(airline, model, remove_vars_by_airline,
-                     reschedule_vars_by_airline):
-    var_fix_constraints = set()
-    for v in remove_vars_by_airline[airline]:
-        var_fix_constraints.add(model.addConstr(v, gurobipy.GRB.EQUAL, 1))
-
-    for v in reschedule_vars_by_airline[airline]:
-        var_fix_constraints.add(model.addConstr(v, gurobipy.GRB.EQUAL, 0))
-    model.update()
-    return var_fix_constraints
-
-
 def remove_constraints(model, constraints):
     for c in constraints:
         model.remove(c)
@@ -90,29 +60,80 @@ def remove_constraints(model, constraints):
     return
 
 
-def build_auction_model(flights, connections, profile,
-                        delay_costs, move_costs, remove_costs,
-                        max_displacement, min_connect, max_connect, turnaround,
-                        peak_time_range=None,
-                        monopoly_benefit_func=None,
-                        monopoly_constraint_rate=None,
-                        verbose=False):
+@attr.s(kw_only=True)
+class AuctionVarStruct(object):
+    remove_vars = attr.ib(type=typing.Mapping[int, grb.Var])
+    reschedule_vars = attr.ib(type=typing.Mapping[typing.Tuple[int, int], grb.Var])  # key: (flightid, timeperiod)
+    airline_remove_vars = attr.ib(type=typing.Mapping[str, typing.Set[grb.Var]])
+    airline_reschedule_vars = attr.ib(type=typing.Mapping[str, typing.Set[grb.Var]])
+
+    @staticmethod
+    def build(flights: typing.Iterable[flightsched.Flight], remove_vars: typing.Mapping[int, grb.Var],
+              reschedule_vars: typing.Mapping[typing.Tuple[int, int], grb.Var],
+              max_displacement: int, n_slots: int):
+        # Organize variables by airline
+        remove_vars_by_airline = {}
+        reschedule_vars_by_airline = {}
+        for f in flights:
+            if f.airline not in remove_vars_by_airline:
+                remove_vars_by_airline[f.airline] = set()
+                reschedule_vars_by_airline[f.airline] = set()
+
+            remove_vars_by_airline[f.airline].add(remove_vars[f.flight_id])
+
+            earliest_slot = max(f.slot_time - max_displacement, 0)
+            latest_slot = min(f.slot_time + max_displacement, n_slots - 1)
+            for t in range(earliest_slot, latest_slot + 1):
+                reschedule_vars_by_airline[f.airline].add(
+                    reschedule_vars[f.flight_id, t])
+        return AuctionVarStruct(remove_vars=remove_vars, reschedule_vars=reschedule_vars,
+                                airline_remove_vars=remove_vars_by_airline,
+                                airline_reschedule_vars=reschedule_vars_by_airline)
+
+
+@attr.s(kw_only=True)
+class AuctionIpStruct(object):
+    model = attr.ib(type=grb.Model)
+    ipvars = attr.ib(type=AuctionVarStruct)
+
+
+def fix_airline_vars(airline, modelstruct: AuctionIpStruct):
+    var_fix_constraints = set()
+    for v in modelstruct.ipvars.airline_remove_vars[airline]:
+        var_fix_constraints.add(modelstruct.model.addConstr(v, gurobipy.GRB.EQUAL, 1))
+
+    for v in modelstruct.ipvars.airline_reschedule_vars[airline]:
+        var_fix_constraints.add(modelstruct.model.addConstr(v, gurobipy.GRB.EQUAL, 0))
+    modelstruct.model.update()
+    return var_fix_constraints
+
+
+def build_ip(flights: typing.Iterable[flightsched.Flight], connections: typing.Mapping[int, typing.Iterable[int]],
+             profile: typing.List[int],
+             delay_costs: typing.Mapping[typing.Tuple[int, int], float],
+             move_costs: typing.Mapping[typing.Tuple[int, int], float],
+             remove_costs: typing.Mapping[int, float],
+             max_displacement: int, min_connect: int, max_connect: int, turnaround: int,
+             peak_time_range: range = None,
+             monopoly_benefit_func: typing.Callable[[float], float] = None,
+             monopoly_constraint_rate: float = None,
+             verbose: bool = False) -> AuctionIpStruct:
     """
     :param flights: list of flights
     :param connections: dictionary, key is id of flight, value is a list of connecting flight ids
     :param profile: array-like, ith value is number of slots in ith time period of profile
-    :param delay_costs:
-    :param move_costs:
-    :param remove_costs:
+    :param delay_costs: maps (flightid, timeperiod) to delay cost of assigning flight to time period
+    :param move_costs: maps (flightid, timeperiod) to displacement cost of assigning flight to time period
+    :param remove_costs: maps (flightid) to delay cost of assigning flight to time period
     :param max_displacement: positive integer, units are number of time periods
     :param min_connect: positive integer, units are number of time periods
     :param max_connect: positive integer, units are number of time periods
     :param turnaround: positive integer, units are number of time periods
     :param peak_time_range: range, peak time periods
-    :param monopoly_benefit_func:
+    :param monopoly_benefit_func: callable, argument is proportion of peak slots held, value is monopoly multiplier
     :param monopoly_constraint_rate: real number between 0 and 1. Specifies the maximum  percent of peak time slots that
                                      any aircraft can own.
-    :param verbose:
+    :param verbose: if true, prints stuff to console
     :return:
     """
     # Create model.
@@ -134,9 +155,8 @@ def build_auction_model(flights, connections, profile,
     constant = sum(remove_costs[f.flight_id] for f in flights)
     my_auction_model.setAttr(gurobipy.GRB.attr.ObjCon, constant)
     if monopoly_benefit_func is not None:
-        market_shares = auction_costs.get_airline_market_shares(flights, peak_time_range, profile)
-        max_mono_by_flight = auction_costs.get_monopoly_ub(market_shares, flights, remove_costs, peak_time_range,
-                                                           monopoly_benefit_func)
+        market_shares = flightsched.get_airline_market_shares(flights, peak_time_range, profile)
+        max_mono_by_flight = get_monopoly_ub(market_shares, flights, remove_costs, monopoly_benefit_func)
     else:
         max_mono_by_flight = {f.flight_id: 0 for f in flights}
 
@@ -163,21 +183,8 @@ def build_auction_model(flights, connections, profile,
             reschedule_vars[f.flight_id, t] = next_reschedule_var
     my_auction_model.update()
 
-    # Organize variables by airline
-    remove_vars_by_airline = {}
-    reschedule_vars_by_airline = {}
-    for f in flights:
-        if f.airline not in remove_vars_by_airline:
-            remove_vars_by_airline[f.airline] = set()
-            reschedule_vars_by_airline[f.airline] = set()
-
-        remove_vars_by_airline[f.airline].add(remove_vars[f.flight_id])
-
-        earliest_slot = max(f.slot_time - max_displacement, 0)
-        latest_slot = min(f.slot_time + max_displacement, n_slots - 1)
-        for t in range(earliest_slot, latest_slot + 1):
-            reschedule_vars_by_airline[f.airline].add(
-                reschedule_vars[f.flight_id, t])
+    ipvar_struct = AuctionVarStruct.build(flights=flights, remove_vars=remove_vars, reschedule_vars=reschedule_vars,
+                                          max_displacement=max_displacement, n_slots=n_slots)
 
     if monopoly_constraint_rate is not None and peak_time_range is not None:
         add_monopoly_constraints(flights, monopoly_constraint_rate, peak_time_range,
@@ -217,12 +224,12 @@ def build_auction_model(flights, connections, profile,
                                            gurobipy.GRB.GREATER_EQUAL,
                                            reschedule_vars[f_id1, t_1])
 
-    airline_aircraft_dict = flight.find_airline_aircraft(flights)
-    airline_aircraft_imbalances = flight.find_airline_aircraft_imbalances(
+    airline_aircraft_dict = flightsched.find_airline_aircraft(flights)
+    airline_aircraft_imbalances = flightsched.find_airline_aircraft_imbalances(
         airline_aircraft_dict)
-    airline_aircraft_overnight = flight.find_max_overnight_by_airline_aircraft(flights,
-                                                                               turnaround,
-                                                                               n_slots)
+    airline_aircraft_overnight = flightsched.find_max_overnight_by_airline_aircraft(flights,
+                                                                                    turnaround,
+                                                                                    n_slots)
     # Add aircraft reserve constraints
     if verbose:
         print("Adding reserve constraints")
@@ -254,7 +261,7 @@ def build_auction_model(flights, connections, profile,
             earliest_slot = max(f.slot_time - max_displacement, 0)
             latest_slot = min(f.slot_time + max_displacement, n_slots - 1)
             for t in range(earliest_slot, latest_slot + 1):
-                if (f.is_arrival):
+                if f.is_arrival:
                     balance_constr_LHS.add(reschedule_vars[f.flight_id, t], -1)
                 else:
                     balance_constr_LHS.add(reschedule_vars[f.flight_id, t])
@@ -268,22 +275,18 @@ def build_auction_model(flights, connections, profile,
         print("Adding profile constraints")
     # Add profile constraints
     for t, n in enumerate(profile):
-        slot_constr_LHS = gurobipy.LinExpr()
+        slot_constr_lhs = gurobipy.LinExpr()
         for f in flights:
             earliest_slot = max(f.slot_time - max_displacement, 0)
             latest_slot = min(f.slot_time + max_displacement, n_slots - 1)
-            if (t >= earliest_slot and t <= latest_slot):
-                slot_constr_LHS.add(reschedule_vars[f.flight_id, t])
+            if earliest_slot <= t <= latest_slot:
+                slot_constr_lhs.add(reschedule_vars[f.flight_id, t])
 
-        my_auction_model.addConstr(slot_constr_LHS, gurobipy.GRB.LESS_EQUAL, n,
+        my_auction_model.addConstr(slot_constr_lhs, gurobipy.GRB.LESS_EQUAL, n,
                                    name='PC' + str(t))
 
     my_auction_model.update()
-    return {'model': my_auction_model,
-            'removal_vars': remove_vars,
-            'reschedule_vars': reschedule_vars,
-            'removal_vars_airline': remove_vars_by_airline,
-            'reschedule_vars_airline': reschedule_vars_by_airline}
+    return AuctionIpStruct(model=my_auction_model, ipvars=ipvar_struct)
 
 
 def add_monopoly_constraints(flights, monopoly_constraint_rate, peak_time_range, reschedule_vars, model,
@@ -311,47 +314,47 @@ def check_constraints(new_flights, old_flights, connections,
                       turnaround, profile, peak_time_range, monopoly_constraint_rate):
     n_slots = len(profile)
     if not check_flight_balance(new_flights, old_flights):
-        print("Flight balance violated")
+        warnings.warn("Flight balance violated", RuntimeWarning)
     if not check_connections(connections, new_flights, min_connect, max_connect):
-        print("Connections violated")
+        warnings.warn("Connections violated", RuntimeWarning)
     if not check_overnight_numbers(new_flights, old_flights, turnaround, n_slots):
-        print("Overnight constraints violated")
+        warnings.warn("Overnight constraints violated", RuntimeWarning)
     if not check_profile(new_flights, profile):
-        print("Profile constraints violated")
+        warnings.warn("Profile constraints violated", RuntimeWarning)
     if not check_max_displacement(new_flights, old_flights, max_displacement):
-        print("Max displacement constraints violated")
+        warnings.warn("Max displacement constraints violated", RuntimeWarning)
     if peak_time_range is not None and monopoly_constraint_rate is not None:
         if not check_monopoly_constraints(new_flights, profile, peak_time_range,
                                           monopoly_constraint_rate):
-            print("Monopoly constraints violated")
-    check_flight_balance(new_flights, old_flights)
+            warnings.warn("Monopoly constraints violated.", RuntimeWarning)
+    if not check_flight_balance(new_flights, old_flights):
+        warnings.warn("Flight balance constraints violated.", RuntimeWarning)
 
 
 def check_profile(new_flights, profile):
     num_times = len(profile)
-    f_profile = flight.get_aggregated_flight_schedule(new_flights, num_times)
+    f_profile = flightsched.get_aggregated_flight_schedule(new_flights, num_times)
     for x, y in zip(f_profile, profile):
         if x > y:
             return False
     return True
 
 
-def check_flight_balance(new_flights, old_flights):
-    old_airline_aircraft_imbalance = flight.find_airline_aircraft(old_flights)
-    new_airline_aircraft_imbalance = flight.find_airline_aircraft(new_flights)
+def check_flight_balance(new_flights, old_flights) -> bool:
+    old_airline_aircraft_imbalance = flightsched.find_airline_aircraft(old_flights)
+    new_airline_aircraft_imbalance = flightsched.find_airline_aircraft(new_flights)
     for aa, old_imbalance in old_airline_aircraft_imbalance:
-        if (aa in new_airline_aircraft_imbalance):
+        if aa in new_airline_aircraft_imbalance:
             new_imbalance = new_airline_aircraft_imbalance[aa]
-            if (new_imbalance < min(old_imbalance, 0) or
-                    new_imbalance > max(old_imbalance, 0)):
+            if new_imbalance < min(old_imbalance, 0) or new_imbalance > max(old_imbalance, 0):
                 return False
     return True
 
 
-def check_overnight_numbers(new_flights, old_flights, turnaround, n_slots):
-    old_airline_aircraft_overnight = flight.find_max_overnight_by_airline_aircraft(
+def check_overnight_numbers(new_flights, old_flights, turnaround, n_slots) -> bool:
+    old_airline_aircraft_overnight = flightsched.find_max_overnight_by_airline_aircraft(
         old_flights, turnaround, n_slots)
-    new_airline_aircraft_overnight = flight.find_max_overnight_by_airline_aircraft(
+    new_airline_aircraft_overnight = flightsched.find_max_overnight_by_airline_aircraft(
         new_flights, turnaround, n_slots)
     for aa, old_overnight in old_airline_aircraft_overnight:
         if aa in new_airline_aircraft_overnight:
@@ -361,7 +364,7 @@ def check_overnight_numbers(new_flights, old_flights, turnaround, n_slots):
     return True
 
 
-def check_connections(connections, flights, min_connect, max_connect):
+def check_connections(connections, flights, min_connect, max_connect) -> bool:
     id_to_flight = {f.flight_id: f for f in flights}
     for id_1, con_list in connections.items():
         if id_1 in id_to_flight:
@@ -369,13 +372,13 @@ def check_connections(connections, flights, min_connect, max_connect):
             for id_2 in con_list:
                 if id_2 in id_to_flight:
                     flight_2 = id_to_flight[id_2]
-                    if (
-                            flight_2.slot_time - flight_1.slot_time < min_connect or flight_2.slot_time - flight_1.slot_time > max_connect):
+                    if (flight_2.slot_time - flight_1.slot_time < min_connect
+                            or flight_2.slot_time - flight_1.slot_time > max_connect):
                         return False
     return True
 
 
-def check_max_displacement(new_flights, old_flights, max_displacement):
+def check_max_displacement(new_flights, old_flights, max_displacement) -> bool:
     original_slot = {}
     for f in old_flights:
         original_slot[f] = f.slot_time
@@ -387,7 +390,7 @@ def check_max_displacement(new_flights, old_flights, max_displacement):
     return True
 
 
-def check_monopoly_constraints(new_flights, profile, peak_time_period, monopoly_constraint_rate):
+def check_monopoly_constraints(new_flights, profile, peak_time_period, monopoly_constraint_rate) -> bool:
     max_num_slots = sum(profile[t] for t in peak_time_period) * monopoly_constraint_rate
     airline_num_slots = {}
     for f in new_flights:
@@ -398,3 +401,18 @@ def check_monopoly_constraints(new_flights, profile, peak_time_period, monopoly_
             if airline_num_slots[f.airline] > max_num_slots:
                 return f.airline
     return True
+
+
+def get_monopoly_ub(market_shares, flights, remove_costs, monopoly_benefit):
+    monopoly_ub = {f.flight_id: 0 for f in flights}
+    if monopoly_benefit is None:
+        return monopoly_ub
+
+    value_by_flight = {}
+    for f in flights:
+        if f.airline in market_shares.keys():
+            percent_benefit = monopoly_benefit(market_shares[f.airline])
+            value_by_flight[f.flight_id] = percent_benefit * remove_costs[f.flight_id]
+        else:
+            value_by_flight[f.flight_id] = 0.0
+    return value_by_flight

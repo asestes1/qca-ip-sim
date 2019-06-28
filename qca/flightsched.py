@@ -3,6 +3,8 @@ import numpy
 import matplotlib.pyplot
 import attr
 import typing
+import gurobipy
+import collections
 
 
 def cargo_flight_seat_dict() -> typing.Dict[str, int]:
@@ -32,6 +34,26 @@ class Flight(object):
                       aircraft_type=self.aircraft_type,
                       flight_id=self.flight_id)
 
+
+def get_new_flight_schedule(flights: typing.Iterable[Flight], n_slots: int, ip_model: gurobipy.Model) -> \
+        typing.Set[Flight]:
+    new_flights = set()
+    for f in flights:
+        found = False
+        for t in range(0, n_slots):
+            sched_var = ip_model.getVarByName('F' + str(f.flight_id) + 'T' + str(t))
+            if sched_var is not None and abs(sched_var.getAttr("X") - 1.0) < 0.0001:
+                if not found:
+                    found = True
+                    new_flights.add(f.copy_reschedule(t))
+                else:
+                    print("Error: flight is double scheduled")
+
+        if not found:
+            remove_var = ip_model.getVarByName('R' + str(f.flight_id))
+            if remove_var is None or remove_var.getAttr("X") < 0.000001:
+                print("Error: flight is neither scheduled nor removed")
+    return new_flights
 
 def read_flights(oag_file, airport, date, min_per_slot):
     oag_dataframe = pandas.read_csv(oag_file)
@@ -161,7 +183,7 @@ def plot_cumulative_aircraft(flights, n_slots):
         if (f.airline, f.aircraft_type) not in departure_plots:
             departure_plots[f.airline, f.aircraft_type] = numpy.zeros(n_slots)
             arrival_plots[f.airline, f.aircraft_type] = numpy.zeros(n_slots)
-        new_vector = [0] * (f.slot_time)
+        new_vector = [0] * f.slot_time
         new_vector.extend([1] * (n_slots - f.slot_time))
         if f.is_arrival:
             arrival_plots[f.airline, f.aircraft_type] = numpy.add(
@@ -180,3 +202,14 @@ def plot_cumulative_aircraft(flights, n_slots):
 
         matplotlib.pyplot.legend(['Arrivals', 'Departures'])
     return
+
+def get_airline_market_shares(flights: typing.Iterable[Flight], peak_time_range, profile) -> typing.Dict[
+    str, float]:
+    num_peak_slots = sum(profile[t] for t in peak_time_range)
+    share_by_airline = collections.defaultdict(float)
+    for f in flights:
+        if f.slot_time in peak_time_range:
+            if f.airline not in share_by_airline:
+                share_by_airline[f.airline] = 0
+            share_by_airline[f.airline] += 1 / num_peak_slots
+    return share_by_airline

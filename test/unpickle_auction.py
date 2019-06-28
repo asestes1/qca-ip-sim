@@ -12,7 +12,7 @@ sys.path.append(os.path.join(__file__, os.pardir))
 import pickle
 import ast
 import os
-import qca.flight as flight
+import qca.flightsched as flight
 import pandas
 
 year = '2007'

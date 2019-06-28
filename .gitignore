@@ -109,3 +109,4 @@ venv.bak/
 .idea/qca-ip-sim.iml
 .idea/vcs.xml
 .idea/workspace.xml
+.idea/encodings.xml
