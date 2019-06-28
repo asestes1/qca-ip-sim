@@ -13,6 +13,7 @@ import typing
 import math
 import matplotlib.pyplot
 import collections
+import warnings
 
 SlotProfile = typing.Tuple[int]
 
@@ -212,7 +213,7 @@ def cost_move(f, t, gamma_f, exponent):
 
 def get_schedule_value_without_monopoly(schedule: typing.Iterable[flightsched.Flight],
                                         params: AuctionRunParams):
-    n_slots=len(params.profiles[0])
+    n_slots = len(params.profiles[0])
     delayresults = delaycalc.get_combined_qdelays(scenarios=params.scenarios,
                                                   flights=schedule,
                                                   n_slots=n_slots)
@@ -247,7 +248,8 @@ def get_schedule_monopoly_value(flights, profile, params: AuctionRunParams) -> t
             percent_benefit = params.monopoly_benefit_func(market_shares[f.airline])
             value_by_airline[f.airline] += percent_benefit * cost_remove(f=f,
                                                                          max_displacement=params.max_displacement,
-                                                   n_slots=len(profile), gamma_f=params.gamma_f, exponent=params.exponent)
+                                                                         n_slots=len(profile), gamma_f=params.gamma_f,
+                                                                         exponent=params.exponent)
     return value_by_airline
 
 
@@ -334,27 +336,13 @@ def get_profile_assignment(profile: SlotProfile, airline: typing.Optional[str], 
 
     initialize_costs(params=params, profile=profile, move_costs=move_costs, remove_costs=remove_costs,
                      n_slots=n_slots, modelstruct=modelstruct)  # delay costs to zero, monopoly costs to current sched
-    modelstruct.model.optimize()
-    new_flights = flightsched.get_new_flight_schedule(params.flights, n_slots, modelstruct.model)
-    # Calculate the expected delays in the estimated schedule
-    delay_estimates = delaycalc.get_combined_qdelays(scenarios=params.scenarios, flights=new_flights,
-                                                     n_slots=n_slots)
-    delay_costs = make_delay_costs(params.flights, params.max_delay, params.alpha_f,
-                                   params.beta_f,
-                                   delay_estimates.p_canc,
-                                   delay_estimates.avg_delay,
-                                   delay_estimates.prob,
-                                   threshold=params.delay_threshold)
-    qcaip.reset_delay_costs(model=modelstruct.model, delay_costs=delay_costs,
-                            move_costs=move_costs, flights=params.flights, n_slots=n_slots)
-
     air_constr = None
     if airline is not None:
         air_constr = qcaip.fix_airline_vars(airline=airline, modelstruct=modelstruct)
 
     iterations = 0
     converged = False
-    previous_assignments = [new_flights]
+    previous_assignments = []
     while not converged:
         iterations += 1
         # Find an estimated schedule
@@ -362,18 +350,42 @@ def get_profile_assignment(profile: SlotProfile, airline: typing.Optional[str], 
         new_flights = flightsched.get_new_flight_schedule(params.flights, n_slots, modelstruct.model)
         try:
             cycle_index = previous_assignments.index(new_flights)
+            converged = True
             if cycle_index == len(previous_assignments) - 1:
-                converged = True
-            else:
-                raise RuntimeError("Error in running auction: Cycling on run " + str(profile[0]) + ", " + str(airline))
+                warnings.warn("Error in running auction: Cycling on run " + str(profile[0]) + ", " + str(airline))
         except ValueError:
             pass
         if iterations >= params.max_iter:
             raise RuntimeError(
                 "ITERATIONS HAVE REACHED MAXIMUM: " + str(iterations) + " run: " + str(profile[0]) + ", " + str(
                     airline))
+        previous_assignments.append(new_flights)
 
+        if params.validate:
+            qcaip.check_constraints(new_flights, params.flights, params.connections,
+                                    params.min_connect, params.max_connect, params.max_displacement,
+                                    params.turnaround, profile, params.peak_time_range,
+                                    params.monopoly_constraint_rate)
         if not converged:
+            delay_estimates = delaycalc.get_combined_qdelays(scenarios=params.scenarios, flights=new_flights,
+                                                             n_slots=n_slots)
+            agg_flights = flightsched.get_aggregated_flight_schedule(new_flights, num_times=n_slots+9)
+            matplotlib.pyplot.figure()
+            est_exp_avg_delay = delay_estimates.prob.dot(delay_estimates.avg_delay)
+            matplotlib.pyplot.plot(range(0, len(profile)), profile, label='flights')
+
+            matplotlib.pyplot.plot(range(0, len(profile)+9), agg_flights, label='flights')
+            matplotlib.pyplot.plot(range(0, len(profile) + 9), est_exp_avg_delay, label='delays')
+            matplotlib.pyplot.legend()
+            matplotlib.pyplot.show()
+            delay_costs = make_delay_costs(params.flights, params.max_delay, params.alpha_f,
+                                           params.beta_f,
+                                           delay_estimates.p_canc,
+                                           delay_estimates.avg_delay,
+                                           delay_estimates.prob,
+                                           threshold=params.delay_threshold)
+            qcaip.reset_delay_costs(model=modelstruct.model, delay_costs=delay_costs,
+                                    move_costs=move_costs, flights=params.flights, n_slots=n_slots)
             # Reassign variable costs for the new estimated schedule
             if params.monopoly_benefit_func is not None and params.peak_time_range is not None:
                 market_shares = flightsched.get_airline_market_shares(new_flights, params.peak_time_range, profile)
@@ -381,12 +393,6 @@ def get_profile_assignment(profile: SlotProfile, airline: typing.Optional[str], 
                                            delay_costs, move_costs,
                                            params.monopoly_benefit_func,
                                            params.peak_time_range)
-        previous_assignments.append(new_flights)
-
-        if params.validate:
-            qcaip.check_constraints(new_flights, params.flights, params.connections,
-                                    params.min_connect, params.max_connect, params.max_displacement,
-                                    params.turnaround, profile, params.peak_time_range, params.monopoly_constraint_rate)
     ip_value = modelstruct.model.getAttr(gurobipy.GRB.attr.ObjVal)
     ip_value_by_airline = get_ip_value_by_airline(n_slots, params.flights, modelstruct.model)
 

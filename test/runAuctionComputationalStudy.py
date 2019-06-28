@@ -18,6 +18,7 @@ import numpy
 import pickle
 import os
 import math
+import matplotlib.pyplot
 
 year = '2007'
 month = '02'
@@ -39,11 +40,11 @@ scen_file = os.path.join(data_folder, 'scenariosJFK.csv')
 # folder ='HighAgg_UncontMono_VaryBeta_AllSubs'
 # folder='VaryingBetaAllSubauctions'
 # folder = 'JOVaryBetaResults'
-folder = 'FixedProf25_NoAgg_UncMono_VaryBeta_AllSubs'
-results_directory = '../results/' + folder + '/'
+# folder = 'FixedProf25_NoAgg_UncMono_VaryBeta_AllSubs'
+# results_directory = '../results/' + folder + '/'
 
-if not os.path.isdir(results_directory):
-    os.mkdir(results_directory)
+# if not os.path.isdir(results_directory):
+#     os.mkdir(results_directory)
 
 max_delay = 120
 exponent = 2
@@ -111,8 +112,8 @@ remove_costs = qcarun.make_remove_costs(flights, max_displacement, 4 * 24, gamma
 print("Running auction")
 print(numpy.log2([0.0625, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0]))
 
-for b in [0.0625, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0]:
-    # for b in [0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0]:
+#for b in [0.0625, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0]:
+for b in [16.0]:
     beta_f = {f.flight_id: b for f in flights}
     auction_params = qcarun.AuctionRunParams(flights=flights,
                                              connections=connections,
@@ -150,6 +151,11 @@ for b in [0.0625, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0]:
 
     print(numpy.max(est_exp_avg_delay-actual_exp_avg_delay))
     print(numpy.min(est_exp_avg_delay - actual_exp_avg_delay))
+    matplotlib.pyplot.figure()
+
+    matplotlib.pyplot.plot(range(0,len(profiles[0])+9), actual_exp_avg_delay, label='est')
+    matplotlib.pyplot.plot(range(0, len(profiles[0])+9), est_exp_avg_delay, label='actual')
+    matplotlib.pyplot.legend()
 
     print(sum(qcarun.get_schedule_monopoly_value(flights=schedule,
                                                  profile=profiles[0],
@@ -195,3 +201,4 @@ for b in [0.0625, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0]:
 #             exponent) + '.p', 'wb') as my_file:
 #         pickle.dump(results, my_file)
 # #
+matplotlib.pyplot.show()
