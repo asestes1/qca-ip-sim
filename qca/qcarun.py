@@ -39,6 +39,7 @@ class AuctionRunParams(object):
     monopoly_benefit_func = attr.ib(type=typing.Callable[[float], float])
     monopoly_constraint_rate = attr.ib(type=float)
     verbose = attr.ib(type=bool)
+    delay_stepsize = attr.ib(type=typing.Callable[[int], float], default=lambda x: 1 / x)
     max_iter = attr.ib(type=int, default=50)
     warm_model = attr.ib(type=typing.Optional[qcaip.AuctionIpStruct], default=None)
     delay_threshold = attr.ib(type=int, default=0)
@@ -86,7 +87,7 @@ def make_remove_costs(flights, max_displacement, n_slots, gamma_f, exponent):
 
 
 def make_delay_costs(flights: typing.Iterable[flightsched.Flight], max_delay, alpha_f, beta_f,
-                     cancel_probs, delays, scenario_probs, threshold=0):
+                     cancel_probs, delays, scenario_probs, threshold=0) -> typing.Dict[typing.Tuple[int, int], float]:
     """
     Creates a map that stores the cost of delay for each flight at each time.
     flights - an iterable of flights
@@ -321,6 +322,46 @@ class SubauctionResult(object):
     delay_estimates = attr.ib(type=delaycalc.CombinedQueueResults)
 
 
+def assignment_diff(flights: typing.Iterable[flightsched.Flight],
+                    assignment_a: typing.Iterable[flightsched.Flight],
+                    assignment_b: typing.Iterable[flightsched.Flight]):
+    assignment_a = {f.flight_id: f.slot_time for f in assignment_a}
+    assignment_b = {f.flight_id: f.slot_time for f in assignment_b}
+
+    score = 0
+    for f in flights:
+        if f.flight_id in assignment_a and f.flight_id in assignment_b:
+            if assignment_b[f.flight_id] != assignment_a[f.flight_id]:
+                score += abs(assignment_b[f.flight_id] - assignment_a[f.flight_id])
+    return score
+
+def max_assignment_diff(flights: typing.Iterable[flightsched.Flight],
+                    assignment_a: typing.Iterable[flightsched.Flight],
+                    assignment_b: typing.Iterable[flightsched.Flight]):
+    assignment_a = {f.flight_id: f.slot_time for f in assignment_a}
+    assignment_b = {f.flight_id: f.slot_time for f in assignment_b}
+
+    max = 0
+    for f in flights:
+        if f.flight_id in assignment_a and f.flight_id in assignment_b:
+            if abs(assignment_b[f.flight_id] - assignment_a[f.flight_id]) > max:
+                max = abs(assignment_b[f.flight_id] - assignment_a[f.flight_id])
+
+    return max
+
+def removal_score(flights: typing.Iterable[flightsched.Flight],
+                    assignment_a: typing.Iterable[flightsched.Flight],
+                    assignment_b: typing.Iterable[flightsched.Flight]):
+    assignment_a = {f.flight_id: f.slot_time for f in assignment_a}
+    assignment_b = {f.flight_id: f.slot_time for f in assignment_b}
+
+    score = 0
+    for f in flights:
+        if (f.flight_id in assignment_a) != (f.flight_id in assignment_b):
+            score += 1
+    return score
+
+
 def get_profile_assignment(profile: SlotProfile, airline: typing.Optional[str], params: AuctionRunParams, n_slots: int,
                            move_costs: typing.Mapping[typing.Tuple[int, int], float],
                            remove_costs: typing.Mapping[int, float]):
@@ -343,22 +384,38 @@ def get_profile_assignment(profile: SlotProfile, airline: typing.Optional[str], 
     iterations = 0
     converged = False
     previous_assignments = []
+    delay_costs = None
+    old_estimates = None
     while not converged:
         iterations += 1
+        print(airline, profile[0], iterations)
+
         # Find an estimated schedule
         modelstruct.model.optimize()
         new_flights = flightsched.get_new_flight_schedule(params.flights, n_slots, modelstruct.model)
         try:
             cycle_index = previous_assignments.index(new_flights)
-            converged = True
             if cycle_index == len(previous_assignments) - 1:
-                warnings.warn("Error in running auction: Cycling on run " + str(profile[0]) + ", " + str(airline))
+                converged = True
+            else:
+                print("CYCLED: " + len(previous_assignments) - cycle_index)
+                previous_assignments = []
         except ValueError:
             pass
         if iterations >= params.max_iter:
             raise RuntimeError(
                 "ITERATIONS HAVE REACHED MAXIMUM: " + str(iterations) + " run: " + str(profile[0]) + ", " + str(
                     airline))
+        if previous_assignments:
+            print("DIFF: ", assignment_diff(flights=params.flights,
+                                             assignment_a=previous_assignments[-1],
+                                             assignment_b=new_flights))
+            print("MAX DIFF: ", max_assignment_diff(flights=params.flights,
+                                            assignment_a=previous_assignments[-1],
+                                            assignment_b=new_flights))
+            print("REMOVE: ", removal_score(flights=params.flights,
+                                                    assignment_a=previous_assignments[-1],
+                                                    assignment_b=new_flights))
         previous_assignments.append(new_flights)
 
         if params.validate:
@@ -369,21 +426,30 @@ def get_profile_assignment(profile: SlotProfile, airline: typing.Optional[str], 
         if not converged:
             delay_estimates = delaycalc.get_combined_qdelays(scenarios=params.scenarios, flights=new_flights,
                                                              n_slots=n_slots)
-            agg_flights = flightsched.get_aggregated_flight_schedule(new_flights, num_times=n_slots+9)
-            matplotlib.pyplot.figure()
-            est_exp_avg_delay = delay_estimates.prob.dot(delay_estimates.avg_delay)
-            matplotlib.pyplot.plot(range(0, len(profile)), profile, label='flights')
 
-            matplotlib.pyplot.plot(range(0, len(profile)+9), agg_flights, label='flights')
-            matplotlib.pyplot.plot(range(0, len(profile) + 9), est_exp_avg_delay, label='delays')
-            matplotlib.pyplot.legend()
-            matplotlib.pyplot.show()
-            delay_costs = make_delay_costs(params.flights, params.max_delay, params.alpha_f,
-                                           params.beta_f,
-                                           delay_estimates.p_canc,
-                                           delay_estimates.avg_delay,
-                                           delay_estimates.prob,
-                                           threshold=params.delay_threshold)
+            new_delay_costs = make_delay_costs(params.flights, params.max_delay, params.alpha_f,
+                                               params.beta_f,
+                                               delay_estimates.p_canc,
+                                               delay_estimates.avg_delay,
+                                               delay_estimates.prob,
+                                               threshold=params.delay_threshold)
+            if old_estimates is not None:
+                old_exp_avg_delay = old_estimates.prob.dot(old_estimates.avg_delay)
+                new_exp_avg_delay = delay_estimates.prob.dot(delay_estimates.avg_delay)
+
+                # matplotlib.pyplot.figure()
+                # matplotlib.pyplot.plot(range(0, len(profile) + 9), old_exp_avg_delay, label='previous')
+                # matplotlib.pyplot.plot(range(0, len(profile) + 9), new_exp_avg_delay, label='new')
+                # matplotlib.pyplot.legend()
+                # matplotlib.pyplot.show()
+
+            old_estimates = delay_estimates
+            if delay_costs is None:
+                delay_costs = new_delay_costs
+            else:
+                step = params.delay_stepsize(iterations)
+                delay_costs = {k: step * new_delay_costs[k] + (1 - step) * v for k, v in delay_costs.items()}
+
             qcaip.reset_delay_costs(model=modelstruct.model, delay_costs=delay_costs,
                                     move_costs=move_costs, flights=params.flights, n_slots=n_slots)
             # Reassign variable costs for the new estimated schedule
@@ -406,7 +472,7 @@ def get_profile_assignment(profile: SlotProfile, airline: typing.Optional[str], 
 def run_pricing_auction(params: AuctionRunParams) -> typing.Mapping[
     typing.Tuple[SlotProfile, typing.Optional[str]], SubauctionResult]:
     if params.run_subauctions:
-        subauctions = [None] + [f.airline for f in params.flights]
+        subauctions = [None] + list({f.airline for f in params.flights})
     else:
         subauctions = [None]
     n_slots = len(params.profiles[0])

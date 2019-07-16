@@ -75,15 +75,14 @@ peak_time_range = range(62, 70)
 # monopoly_constraint_rate = 0.4
 monopoly_constraint_rate = None
 
-profiles = [tuple([26] * 4 * 24)]
-# profiles = [[20] * 4 * 24, [18] * 4 * 24, [19] * 4 * 24, [20] * 4 * 24
+profiles = [tuple([20] * 4 * 24)]
+# profiles = [[17] * 4 * 24, [18] * 4 * 24, [19] * 4 * 24, [20] * 4 * 24
 #    , [21] * 4 * 24, [22] * 4 * 24, [23] * 4 * 24, [24] * 4 * 24, [25.0] * 4 * 24,
 #            [26.0] * 4 * 24]
 
 with open(connections_file, 'rb') as connect_pickle:
-    print(connect_pickle)
     connections = pickle.load(connect_pickle)
-    print(connections)
+    print(len(connections))
 
 default_allocation = flight.get_aggregated_flight_schedule(flights, 96)
 for i in range(0, 96):
@@ -104,7 +103,6 @@ else:
     airline_subauctions = subauctions
 
 scenarios = numpy.genfromtxt(scen_file, skip_header=1, delimiter=',')
-print(scenarios)
 move_costs = qcarun.make_move_costs(flights, gamma_f, 96, exponent)
 max_displacement = 4
 remove_costs = qcarun.make_remove_costs(flights, max_displacement, 4 * 24, gamma_f, exponent)
@@ -112,8 +110,9 @@ remove_costs = qcarun.make_remove_costs(flights, max_displacement, 4 * 24, gamma
 print("Running auction")
 print(numpy.log2([0.0625, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0]))
 
-#for b in [0.0625, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0]:
-for b in [16.0]:
+# for b in [0.0625, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0]:
+for b in [8.0]:
+    print("Beta_f: ", b)
     beta_f = {f.flight_id: b for f in flights}
     auction_params = qcarun.AuctionRunParams(flights=flights,
                                              connections=connections,
@@ -128,42 +127,18 @@ for b in [16.0]:
                                              gamma_f=gamma_f,
                                              exponent=exponent,
                                              scenarios=scenarios,
-                                             run_subauctions=False,
+                                             run_subauctions=True,
                                              validate=True,
                                              peak_time_range=peak_time_range,
                                              monopoly_benefit_func=monopoly_benefit_func,
                                              monopoly_constraint_rate=monopoly_constraint_rate,
                                              verbose=False,
-                                             max_iter=50,
+                                             max_iter=100,
                                              warm_model=None,
                                              delay_threshold=0
                                              )
     results = qcarun.run_pricing_auction(auction_params)
-    print(results[profiles[0], None].ipvalue)
-    est_delay = results[profiles[0], None].delay_estimates
-    est_exp_avg_delay = est_delay.prob.dot(est_delay.avg_delay)
 
-    schedule = results[profiles[0], None].schedule
-    actual_delay = delaycalc.get_combined_qdelays(scenarios=auction_params.scenarios,
-                                                  flights= schedule,
-                                                  n_slots=len(profiles[0]))
-    actual_exp_avg_delay = actual_delay.prob.dot(actual_delay.avg_delay)
-
-    print(numpy.max(est_exp_avg_delay-actual_exp_avg_delay))
-    print(numpy.min(est_exp_avg_delay - actual_exp_avg_delay))
-    matplotlib.pyplot.figure()
-
-    matplotlib.pyplot.plot(range(0,len(profiles[0])+9), actual_exp_avg_delay, label='est')
-    matplotlib.pyplot.plot(range(0, len(profiles[0])+9), est_exp_avg_delay, label='actual')
-    matplotlib.pyplot.legend()
-
-    print(sum(qcarun.get_schedule_monopoly_value(flights=schedule,
-                                                 profile=profiles[0],
-                                                 params=auction_params).values()))
-    print(sum(qcarun.get_schedule_value_without_monopoly(schedule=schedule,
-                                                         params=auction_params).values()))
-
-    print("Beta_f: ", b)
     # run_info_string = 'OD trial.\nScenarios file: ' + scen_file
     # run_info_string += '\nConnections File: ' + connections_file
     # run_info_string += '\nFlights File: ' + oag_file
