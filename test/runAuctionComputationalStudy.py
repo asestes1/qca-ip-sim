@@ -124,7 +124,7 @@ for b in [1.0]:
                                              gamma_f=gamma_f,
                                              exponent=exponent,
                                              scenarios=scenarios,
-                                             run_subauctions=True,
+                                             run_subauctions=False,
                                              validate=True,
                                              peak_time_range=peak_time_range,
                                              monopoly_benefit_func=monopoly_benefit_func,
