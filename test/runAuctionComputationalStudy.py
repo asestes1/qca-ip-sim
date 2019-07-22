@@ -75,10 +75,8 @@ peak_time_range = range(62, 70)
 # monopoly_constraint_rate = 0.4
 monopoly_constraint_rate = None
 
-profiles = [tuple([20] * 4 * 24)]
-# profiles = [[17] * 4 * 24, [18] * 4 * 24, [19] * 4 * 24, [20] * 4 * 24
-#    , [21] * 4 * 24, [22] * 4 * 24, [23] * 4 * 24, [24] * 4 * 24, [25.0] * 4 * 24,
-#            [26.0] * 4 * 24]
+# profiles = [tuple([20] * 4 * 24)]
+profiles = [tuple([i] * 4 * 24) for i in range(17, 27)]
 
 with open(connections_file, 'rb') as connect_pickle:
     connections = pickle.load(connect_pickle)
@@ -110,9 +108,8 @@ remove_costs = qcarun.make_remove_costs(flights, max_displacement, 4 * 24, gamma
 print("Running auction")
 print(numpy.log2([0.0625, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0]))
 
-# for b in [0.0625, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0]:
-for b in [8.0]:
-    print("Beta_f: ", b)
+# [0.0625, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0]
+for b in [1.0]:
     beta_f = {f.flight_id: b for f in flights}
     auction_params = qcarun.AuctionRunParams(flights=flights,
                                              connections=connections,
@@ -138,6 +135,7 @@ for b in [8.0]:
                                              delay_threshold=0
                                              )
     results = qcarun.run_pricing_auction(auction_params)
+    print(results)
 
     # run_info_string = 'OD trial.\nScenarios file: ' + scen_file
     # run_info_string += '\nConnections File: ' + connections_file
