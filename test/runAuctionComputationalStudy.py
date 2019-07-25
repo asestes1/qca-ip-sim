@@ -72,8 +72,8 @@ monopoly_benefit_func = typical_monopoly_func
 
 peak_time_range = range(62, 70)
 # peak_time_range = None
-# monopoly_constraint_rate = 0.4
-monopoly_constraint_rate = None
+monopoly_constraint_rate = 0.4
+# monopoly_constraint_rate = None
 
 # profiles = [tuple([20] * 4 * 24)]
 profiles = [tuple([i] * 4 * 24) for i in range(17, 27)]
@@ -109,7 +109,7 @@ print("Running auction")
 print(numpy.log2([0.0625, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0]))
 
 # [0.0625, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0]
-for b in [1.0]:
+for b in [0.0625]:
     beta_f = {f.flight_id: b for f in flights}
     auction_params = qcarun.AuctionRunParams(flights=flights,
                                              connections=connections,

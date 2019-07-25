@@ -480,13 +480,14 @@ def run_pricing_auction(params: AuctionRunParams) -> AuctionResultStruct:
     best_profile = {}
     for a in subauctions:
         def value_getter(p: SlotProfile) -> float:
-            return results[p, a].ipval
+            return results[p, a].ipvalue
 
         best_profile[a] = max(params.profiles, key=value_getter)
 
-    auction_ipval = results[best_profile[None], None].ipval
+    auction_ipval = results[best_profile[None], None].ipvalue
 
-    payments = {a: results[best_profile[None], a].ipval_by_airline - (auction_ipval - results[best_profile[a], a].ipval)
-                for a in airlines}
+    payments = {
+    a: results[best_profile[None], a].ipvalue_by_airline - (auction_ipval - results[best_profile[a], a].ipvalue)
+    for a in airlines}
     return AuctionResultStruct(best_schedule=results[best_profile[None], None], best_profile=best_profile[None],
                                ipval=auction_ipval, payments=payments)
