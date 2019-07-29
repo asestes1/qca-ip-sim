@@ -18,7 +18,30 @@ import warnings
 SlotProfile = typing.Tuple[int]
 
 
-@attr.s(kw_only=True)
+@attr.s(kw_only=True, frozen=True)
+class InverseFunc(object):
+
+    def __call__(self, iteration_num: int) -> float:
+        return 1 / iteration_num
+
+
+@attr.s(kw_only=True, frozen=True)
+class MonopolyBenefitFunc(object):
+    rmax = attr.ib(type=float)
+    delta = attr.ib(type=float)
+    kappa = attr.ib(type=float)
+
+    def __call__(self, market_share: float) -> float:
+        return monopoly_benefit(rmax=self.rmax, kappa=self.kappa, delta=self.delta, market_share=market_share)
+
+
+def monopoly_benefit(rmax: float, delta: float, kappa: float, market_share: float) -> float:
+    if market_share < delta:
+        return 0
+    return rmax * ((market_share - delta) ** kappa) / ((1 - delta) ** kappa)
+
+
+@attr.s(kw_only=True, frozen=True)
 class AuctionRunParams(object):
     flights = attr.ib(type=typing.Iterable[flightsched.Flight])
     connections = attr.ib(type=typing.Mapping[int, typing.Iterable[int]])  # flightid -> ids of connecting flights
@@ -36,12 +59,13 @@ class AuctionRunParams(object):
     run_subauctions = attr.ib(type=bool)
     validate = attr.ib(type=bool)
     peak_time_range = attr.ib(type=range)
-    monopoly_benefit_func = attr.ib(type=typing.Callable[[float], float])
+    rmax = attr.ib(type=float)
+    delta = attr.ib(type=float)
+    kappa = attr.ib(type=float)
     monopoly_constraint_rate = attr.ib(type=float)
     verbose = attr.ib(type=bool)
-    delay_stepsize = attr.ib(type=typing.Callable[[int], float], default=lambda x: 1 / x)
+    delay_stepsize = attr.ib(type=typing.Callable[[int], float], default=InverseFunc())
     max_iter = attr.ib(type=int, default=50)
-    warm_model = attr.ib(type=typing.Optional[qcaip.AuctionIpStruct], default=None)
     delay_threshold = attr.ib(type=int, default=0)
 
 
@@ -238,7 +262,7 @@ def get_schedule_value_without_monopoly(schedule: typing.Iterable[flightsched.Fl
 
 
 def get_schedule_monopoly_value(flights, profile, params: AuctionRunParams) -> typing.Mapping[str, float]:
-    if params.peak_time_range is None or params.monopoly_benefit_func is None:
+    if params.peak_time_range is None or params.rmax is None or params.delta is None or params.kappa:
         return {f.airline: 0 for f in flights}
 
     market_shares = flightsched.get_airline_market_shares(flights=flights, peak_time_range=params.peak_time_range,
@@ -246,7 +270,8 @@ def get_schedule_monopoly_value(flights, profile, params: AuctionRunParams) -> t
     value_by_airline = collections.defaultdict(int)
     for f in flights:
         if f.airline in market_shares.keys() and f.slot_time in params.peak_time_range:
-            percent_benefit = params.monopoly_benefit_func(market_shares[f.airline])
+            percent_benefit = monopoly_benefit(rmax=params.rmax, delta=params.delta, kappa=params.kappa,
+                                               market_share=market_shares[f.airline])
             value_by_airline[f.airline] += percent_benefit * cost_remove(f=f,
                                                                          max_displacement=params.max_displacement,
                                                                          n_slots=len(profile), gamma_f=params.gamma_f,
@@ -290,7 +315,8 @@ def initialize_ip_model(params: AuctionRunParams, n_slots, move_costs, remove_co
                                    max_connect=params.max_connect,
                                    turnaround=params.turnaround,
                                    peak_time_range=params.peak_time_range,
-                                   monopoly_benefit_func=params.monopoly_benefit_func,
+                                   monopoly_benefit_func=MonopolyBenefitFunc(rmax=params.rmax, kappa=params.kappa,
+                                                                             delta=params.delta),
                                    monopoly_constraint_rate=params.monopoly_constraint_rate,
                                    verbose=params.verbose)
     return model_results
@@ -304,11 +330,12 @@ def initialize_costs(params: AuctionRunParams, profile: SlotProfile,
                         for f, t in itertools.product(params.flights, range(0, n_slots))}
     # Zero the delay costs
     qcaip.reset_delay_costs(modelstruct.model, zero_delay_costs, move_costs, params.flights, n_slots)
-    if params.monopoly_benefit_func is not None and params.peak_time_range is not None:
+    if params.rmax is not None and params.delta is not None and params.kappa is not None and params.peak_time_range is not None:
         market_shares = flightsched.get_airline_market_shares(params.flights, params.peak_time_range, profile)
         qcaip.reset_monopoly_costs(modelstruct.model, market_shares, params.flights, remove_costs,
                                    zero_delay_costs,
-                                   move_costs, params.monopoly_benefit_func, params.peak_time_range)
+                                   move_costs, MonopolyBenefitFunc(rmax=params.rmax, kappa=params.kappa,
+                                                                   delta=params.delta), params.peak_time_range)
     return
 
 
@@ -363,12 +390,13 @@ def removal_score(flights: typing.Iterable[flightsched.Flight],
 
 def get_profile_assignment(profile: SlotProfile, airline: typing.Optional[str], params: AuctionRunParams, n_slots: int,
                            move_costs: typing.Mapping[typing.Tuple[int, int], float],
-                           remove_costs: typing.Mapping[int, float]):
+                           remove_costs: typing.Mapping[int, float],
+                           warm_model: gurobipy.Model = None):
     # This builds a model, which we modify in each of the runs.
-    if params.warm_model is None:
-        params.warm_model = initialize_ip_model(params=params, n_slots=n_slots, move_costs=move_costs,
+    if warm_model is None:
+        warm_model = initialize_ip_model(params=params, n_slots=n_slots, move_costs=move_costs,
                                                 remove_costs=remove_costs)
-    modelstruct = params.warm_model
+    modelstruct = warm_model
 
     qcaip.edit_profile_constr(modelstruct.model, profile, params.flights,
                               monopoly_constraint_rate=params.monopoly_constraint_rate,
@@ -441,11 +469,12 @@ def get_profile_assignment(profile: SlotProfile, airline: typing.Optional[str], 
             qcaip.reset_delay_costs(model=modelstruct.model, delay_costs=delay_costs,
                                     move_costs=move_costs, flights=params.flights, n_slots=n_slots)
             # Reassign variable costs for the new estimated schedule
-            if params.monopoly_benefit_func is not None and params.peak_time_range is not None:
+            if params.rmax is not None and params.delta is not None and params.kappa is not None and params.peak_time_range is not None:
                 market_shares = flightsched.get_airline_market_shares(new_flights, params.peak_time_range, profile)
                 qcaip.reset_monopoly_costs(modelstruct.model, market_shares, params.flights, remove_costs,
                                            delay_costs, move_costs,
-                                           params.monopoly_benefit_func,
+                                           MonopolyBenefitFunc(rmax=params.rmax, kappa=params.kappa,
+                                                               delta=params.delta),
                                            params.peak_time_range)
     ip_value = modelstruct.model.getAttr(gurobipy.GRB.attr.ObjVal)
     ip_value_by_airline = get_ip_value_by_airline(n_slots, params.flights, modelstruct.model)
@@ -461,20 +490,30 @@ class AuctionResultStruct(object):
     best_schedule = attr.ib(type=typing.Iterable[flightsched.Flight])
     best_profile = attr.ib(type=SlotProfile)
     ipval = attr.ib(type=float)
-    payments = attr.ib(type=typing.Dict[str, float])
+    payments = attr.ib(type=typing.Optional[typing.Dict[str, float]])
+    subaction_results = attr.ib(type=typing.Dict[typing.Tuple[SlotProfile, typing.Optional[str]], SubauctionResult])
+    params = attr.ib(type=AuctionRunParams)
 
 
 def run_pricing_auction(params: AuctionRunParams) -> AuctionResultStruct:
+
+
     airlines = {f.airline for f in params.flights}
-    subauctions = {None}.union(airlines)
+    if params.run_subauctions:
+        subauctions = {None}.union(airlines)
+    else:
+        subauctions = {None}
 
     n_slots = len(params.profiles[0])
     move_costs = make_move_costs(flights=params.flights, gamma_f=params.gamma_f, n_slots=n_slots,
                                  exponent=params.exponent)
     remove_costs = make_remove_costs(flights=params.flights, max_displacement=params.max_displacement,
                                      n_slots=n_slots, gamma_f=params.gamma_f, exponent=params.exponent)
+    warm_model = initialize_ip_model(params=params, n_slots=n_slots, move_costs=move_costs,
+                                                remove_costs=remove_costs)
     results = {(p, a): get_profile_assignment(profile=p, airline=a, params=params, n_slots=n_slots,
-                                              move_costs=move_costs, remove_costs=remove_costs)
+                                              move_costs=move_costs, remove_costs=remove_costs,
+                                              warm_model=warm_model)
                for p in params.profiles for a in subauctions}
 
     best_profile = {}
@@ -486,8 +525,13 @@ def run_pricing_auction(params: AuctionRunParams) -> AuctionResultStruct:
 
     auction_ipval = results[best_profile[None], None].ipvalue
 
-    payments = {
-    a: results[best_profile[None], a].ipvalue_by_airline - (auction_ipval - results[best_profile[a], a].ipvalue)
-    for a in airlines}
+    payments = None
+    if params.run_subauctions:
+        payments = {
+            a: results[best_profile[None], None].ipvalue_by_airline[a] - (
+                    auction_ipval - results[best_profile[a], a].ipvalue)
+            for a in airlines}
+
     return AuctionResultStruct(best_schedule=results[best_profile[None], None], best_profile=best_profile[None],
-                               ipval=auction_ipval, payments=payments)
+                               ipval=auction_ipval, payments=payments,
+                               subaction_results=results, params=params)
