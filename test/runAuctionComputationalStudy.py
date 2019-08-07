@@ -33,8 +33,8 @@ oag_file = os.path.join(data_folder, 'OAG-CSV-ID/OAG_JFK_' + year + '_' + month 
 connections_file = os.path.join(data_folder, 'Connections/Connection_' + year + '_' + month + '_' + day + '.p')
 scen_file = os.path.join(data_folder, 'scenariosJFK.csv')
 
-subfolder = 'NoAgg_ContMono_VaryBeta_AllSubs'
-# subfolder ='NoAgg_UncontMono_VaryBeta_AllSubs'
+# subfolder = 'NoAgg_ContMono_VaryBeta_AllSubs'
+subfolder ='NoAgg_UncontMono_VaryBeta_AllSubs'
 # subfolder ='MedAgg_ContMono_VaryBeta_AllSubs'
 # subfolder ='MedAgg_UncontMono_VaryBeta_AllSubs'
 # subfolder ='HighAgg_ContMono_VaryBeta_AllSubs'
@@ -62,8 +62,8 @@ kappa = 1.5
 
 peak_time_range = range(62, 70)
 # peak_time_range = None
-monopoly_constraint_rate = 0.4
-# monopoly_constraint_rate = None
+# monopoly_constraint_rate = 0.4
+monopoly_constraint_rate = None
 
 profiles = [tuple([i] * 4 * 24) for i in range(17, 27)]
 with open(connections_file, 'rb') as connect_pickle:
@@ -95,7 +95,7 @@ print("Running auction")
 print(numpy.log2([0.0625, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0]))
 
 # [0.0625, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0]
-for b in [0.0625]:
+for b in [0.0625, 0.125, 0.25, 0.5, 1.0, 2.0]:
     beta_f = {f.flight_id: b for f in flights}
     auction_params = qcarun.AuctionRunParams(flights=flights,
                                              connections=connections,
