@@ -262,11 +262,12 @@ def get_schedule_value_without_monopoly(schedule: typing.Iterable[flightsched.Fl
 
 
 def get_schedule_monopoly_value(flights, profile, params: AuctionRunParams) -> typing.Mapping[str, float]:
-    if params.peak_time_range is None or params.rmax is None or params.delta is None or params.kappa:
+    if params.peak_time_range is None or params.rmax is None or params.delta is None or params.kappa is None:
         return {f.airline: 0 for f in flights}
 
     market_shares = flightsched.get_airline_market_shares(flights=flights, peak_time_range=params.peak_time_range,
                                                           profile=profile)
+    print(market_shares)
     value_by_airline = collections.defaultdict(int)
     for f in flights:
         if f.airline in market_shares.keys() and f.slot_time in params.peak_time_range:

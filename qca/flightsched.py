@@ -34,6 +34,14 @@ class Flight(object):
                       aircraft_type=self.aircraft_type,
                       flight_id=self.flight_id)
 
+    def copy_change_airline(self, new_airline):
+        return Flight(is_arrival=self.is_arrival,
+                      slot_time=self.slot_time,
+                      n_seats=self.n_seats,
+                      airline=new_airline,
+                      aircraft_type=self.aircraft_type,
+                      flight_id=self.flight_id)
+
 
 def get_new_flight_schedule(flights: typing.Iterable[Flight], n_slots: int, ip_model: gurobipy.Model) -> \
         typing.Set[Flight]:

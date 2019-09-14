@@ -23,9 +23,9 @@ import matplotlib.pyplot
 year = '2007'
 month = '02'
 day = '04'
-# airline_aggregation = 'high'
+airline_aggregation = 'high'
 # airline_aggregation = 'med'
-airline_aggregation = 'none'
+# airline_aggregation = 'none'
 data_folder = os.path.abspath(os.path.join(os.path.join(os.path.join(__file__, os.pardir), os.pardir), 'resources'))
 results_folder = os.path.abspath(os.path.join(os.path.join(os.path.join(__file__, os.pardir), os.pardir), 'results'))
 
@@ -34,11 +34,11 @@ connections_file = os.path.join(data_folder, 'Connections/Connection_' + year + 
 scen_file = os.path.join(data_folder, 'scenariosJFK.csv')
 
 # subfolder = 'NoAgg_ContMono_VaryBeta_AllSubs'
-subfolder ='NoAgg_UncontMono_VaryBeta_AllSubs'
+# subfolder ='NoAgg_UncontMono_VaryBeta_AllSubs'
 # subfolder ='MedAgg_ContMono_VaryBeta_AllSubs'
 # subfolder ='MedAgg_UncontMono_VaryBeta_AllSubs'
 # subfolder ='HighAgg_ContMono_VaryBeta_AllSubs'
-# subfolder ='HighAgg_UncontMono_VaryBeta_AllSubs'
+subfolder ='HighAgg_UncontMono_VaryBeta_AllSubs'
 # subfolder = 'JOVaryBetaResults'
 subfolder += year + '_' + month + '_' + day
 results_subdirectory = os.path.abspath(os.path.join(results_folder, subfolder))
@@ -74,13 +74,21 @@ for i in range(0, 96):
     print("(", i, ",", default_allocation[i], ")")
 
 if airline_aggregation == 'high':
+    new_flights = set()
     for f in flights:
         if f.airline in {'JBU', 'DAL', 'AAL'}:
-            f.airline = 'JBU'
+            new_flights.add(f.copy_change_airline('JBU'))
+        else:
+            new_flights.add(f)
+    flights = new_flights
 elif airline_aggregation == 'med':
+    new_flights = set()
     for f in flights:
         if f.airline in {'JBU', 'DAL'}:
-            f.airline = 'JBU'
+            new_flights.add(f.copy_change_airline('JBU'))
+        else:
+            new_flights.add(f)
+    flights=new_flights
 
 min_connect = 4
 max_connect = 16
@@ -95,7 +103,7 @@ print("Running auction")
 print(numpy.log2([0.0625, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0]))
 
 # [0.0625, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0]
-for b in [0.0625, 0.125, 0.25, 0.5, 1.0, 2.0]:
+for b in [0.0625, 0.125]:
     beta_f = {f.flight_id: b for f in flights}
     auction_params = qcarun.AuctionRunParams(flights=flights,
                                              connections=connections,

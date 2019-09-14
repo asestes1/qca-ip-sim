@@ -34,14 +34,16 @@ results_subdirectory = os.path.abspath(os.path.join(results_folder, subfolder))
 if not os.path.isdir(results_subdirectory):
     os.mkdir(results_subdirectory)
 
-
-with open(
-        os.path.join(os.path.join(results_folder, 'NoAgg_ContMono_VaryBeta_AllSubs2007_02_04'), 'results_b0.0625.out'),
-        'rb') as my_file:
-    my_results: qcarun.AuctionResultStruct = pickle.load(my_file)
-    print(my_results.best_profile)
-    print(my_results.ipval)
-    print(sum(qcarun.get_schedule_value_without_monopoly(my_results.best_schedule.schedule, my_results.params).values()))
-    print(sum(qcarun.get_schedule_monopoly_value(my_results.best_schedule.schedule, my_results.best_profile, my_results.params).values()))
-    print(sum(my_results.payments.values()))
-    print(my_results.params)
+files = ['results_b'+str(b)+'.out' for b in [0.0625, 0.125, 0.25, 0.5, 1.0, 2.0]]
+for f in files:
+    with open(
+            os.path.join(os.path.join(results_folder, 'NoAgg_ContMono_VaryBeta_AllSubs2007_02_04'), f),
+            'rb') as my_file:
+        my_results: qcarun.AuctionResultStruct = pickle.load(my_file)
+        print(my_results.params.peak_time_range, my_results.params.rmax, my_results.params.delta, my_results.params.kappa)
+        print(my_results.best_profile)
+        print(my_results.ipval)
+        print(sum(qcarun.get_schedule_value_without_monopoly(my_results.best_schedule.schedule, my_results.params).values()))
+        print(sum(qcarun.get_schedule_monopoly_value(my_results.best_schedule.schedule, my_results.best_profile, my_results.params).values()))
+        print(sum(my_results.payments.values()))
+        # print(my_results.params)
