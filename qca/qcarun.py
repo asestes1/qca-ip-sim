@@ -267,7 +267,6 @@ def get_schedule_monopoly_value(flights, profile, params: AuctionRunParams) -> t
 
     market_shares = flightsched.get_airline_market_shares(flights=flights, peak_time_range=params.peak_time_range,
                                                           profile=profile)
-    print(market_shares)
     value_by_airline = collections.defaultdict(int)
     for f in flights:
         if f.airline in market_shares.keys() and f.slot_time in params.peak_time_range:
@@ -305,6 +304,10 @@ def initialize_ip_model(params: AuctionRunParams, n_slots, move_costs, remove_co
     # Build a tentative auction model with the given delay costs
     if params.verbose:
         print("BUILDING INITIAL MODEL")
+    if params.rmax is None or params.kappa is None or params.delta is None:
+        mono_func = None
+    else:
+        mono_func = MonopolyBenefitFunc(rmax=params.rmax, kappa=params.kappa,delta=params.delta)
     model_results = qcaip.build_ip(flights=params.flights,
                                    connections=params.connections,
                                    profile=params.profiles[0],
@@ -316,8 +319,7 @@ def initialize_ip_model(params: AuctionRunParams, n_slots, move_costs, remove_co
                                    max_connect=params.max_connect,
                                    turnaround=params.turnaround,
                                    peak_time_range=params.peak_time_range,
-                                   monopoly_benefit_func=MonopolyBenefitFunc(rmax=params.rmax, kappa=params.kappa,
-                                                                             delta=params.delta),
+                                   monopoly_benefit_func=mono_func,
                                    monopoly_constraint_rate=params.monopoly_constraint_rate,
                                    verbose=params.verbose)
     return model_results
@@ -396,7 +398,7 @@ def get_profile_assignment(profile: SlotProfile, airline: typing.Optional[str], 
     # This builds a model, which we modify in each of the runs.
     if warm_model is None:
         warm_model = initialize_ip_model(params=params, n_slots=n_slots, move_costs=move_costs,
-                                                remove_costs=remove_costs)
+                                         remove_costs=remove_costs)
     modelstruct = warm_model
 
     qcaip.edit_profile_constr(modelstruct.model, profile, params.flights,
@@ -497,8 +499,6 @@ class AuctionResultStruct(object):
 
 
 def run_pricing_auction(params: AuctionRunParams) -> AuctionResultStruct:
-
-
     airlines = {f.airline for f in params.flights}
     if params.run_subauctions:
         subauctions = {None}.union(airlines)
@@ -511,7 +511,7 @@ def run_pricing_auction(params: AuctionRunParams) -> AuctionResultStruct:
     remove_costs = make_remove_costs(flights=params.flights, max_displacement=params.max_displacement,
                                      n_slots=n_slots, gamma_f=params.gamma_f, exponent=params.exponent)
     warm_model = initialize_ip_model(params=params, n_slots=n_slots, move_costs=move_costs,
-                                                remove_costs=remove_costs)
+                                     remove_costs=remove_costs)
     results = {(p, a): get_profile_assignment(profile=p, airline=a, params=params, n_slots=n_slots,
                                               move_costs=move_costs, remove_costs=remove_costs,
                                               warm_model=warm_model)
@@ -536,3 +536,26 @@ def run_pricing_auction(params: AuctionRunParams) -> AuctionResultStruct:
     return AuctionResultStruct(best_schedule=results[best_profile[None], None], best_profile=best_profile[None],
                                ipval=auction_ipval, payments=payments,
                                subaction_results=results, params=params)
+
+
+@attr.s(frozen=True, kw_only=True)
+class SchedValueStruct(object):
+    social_value = attr.ib(type=float)
+    mono_value = attr.ib(type=float)
+    payment = attr.ib(type=float)
+
+
+def get_fixed_prof_payments(results: AuctionResultStruct, profile: SlotProfile):
+    params=results.params
+    airlines = {f.airline for f in params.flights}
+    schedule = results.subaction_results[profile, None].schedule
+    social_value = get_schedule_value_without_monopoly(schedule=schedule, params=params)
+    mono_value = get_schedule_monopoly_value(params.flights, profile=profile, params=params)
+
+    auction_ipval = results.subaction_results[profile, None].ipvalue
+    payments = {
+        a: results.subaction_results[profile, None].ipvalue_by_airline[a] - (
+                auction_ipval - results.subaction_results[profile, a].ipvalue)
+        for a in airlines}
+    return SchedValueStruct(social_value=sum(social_value.values()), mono_value=sum(mono_value.values()),
+                            payment=sum(payments.values()))

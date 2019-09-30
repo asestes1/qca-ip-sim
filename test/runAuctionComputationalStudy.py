@@ -23,9 +23,9 @@ import matplotlib.pyplot
 year = '2007'
 month = '02'
 day = '04'
-airline_aggregation = 'high'
+# airline_aggregation = 'high'
 # airline_aggregation = 'med'
-# airline_aggregation = 'none'
+airline_aggregation = 'none'
 data_folder = os.path.abspath(os.path.join(os.path.join(os.path.join(__file__, os.pardir), os.pardir), 'resources'))
 results_folder = os.path.abspath(os.path.join(os.path.join(os.path.join(__file__, os.pardir), os.pardir), 'results'))
 
@@ -33,12 +33,13 @@ oag_file = os.path.join(data_folder, 'OAG-CSV-ID/OAG_JFK_' + year + '_' + month 
 connections_file = os.path.join(data_folder, 'Connections/Connection_' + year + '_' + month + '_' + day + '.p')
 scen_file = os.path.join(data_folder, 'scenariosJFK.csv')
 
+subfolder = 'NoAgg_NoMono_VaryBeta_AllSubs'
 # subfolder = 'NoAgg_ContMono_VaryBeta_AllSubs'
 # subfolder ='NoAgg_UncontMono_VaryBeta_AllSubs'
 # subfolder ='MedAgg_ContMono_VaryBeta_AllSubs'
 # subfolder ='MedAgg_UncontMono_VaryBeta_AllSubs'
 # subfolder ='HighAgg_ContMono_VaryBeta_AllSubs'
-subfolder ='HighAgg_UncontMono_VaryBeta_AllSubs'
+# subfolder ='HighAgg_UncontMono_VaryBeta_AllSubs'
 # subfolder = 'JOVaryBetaResults'
 subfolder += year + '_' + month + '_' + day
 results_subdirectory = os.path.abspath(os.path.join(results_folder, subfolder))
@@ -55,13 +56,13 @@ gamma_f = {f.flight_id: g for f in flights}
 alpha_f = {f.flight_id: a for f in flights}
 # beta_f = {f.flight_id:1 for f in flights}
 
-rmax = 2
-delta = 0.25
-kappa = 1.5
-# rmax = delta = kappa = None
+# rmax = 2
+# delta = 0.25
+# kappa = 1.5
+rmax = delta = kappa = None
 
-peak_time_range = range(62, 70)
-# peak_time_range = None
+# peak_time_range = range(62, 70)
+peak_time_range = None
 # monopoly_constraint_rate = 0.4
 monopoly_constraint_rate = None
 
@@ -103,14 +104,14 @@ print("Running auction")
 print(numpy.log2([0.0625, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0]))
 
 # [0.0625, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0]
-for b in [0.0625, 0.125]:
+for b in [0.125, 2, 1, 0.5, 0.25, 0.0625]:
     beta_f = {f.flight_id: b for f in flights}
     auction_params = qcarun.AuctionRunParams(flights=flights,
                                              connections=connections,
                                              profiles=profiles,
                                              max_displacement=max_displacement,
                                              min_connect=min_connect,
-                                             max_connect=max_connect,
+                                              max_connect=max_connect,
                                              turnaround=turnaround,
                                              max_delay=max_delay,
                                              alpha_f=alpha_f,
