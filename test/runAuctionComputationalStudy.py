@@ -104,7 +104,7 @@ print("Running auction")
 print(numpy.log2([0.0625, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0]))
 
 # [0.0625, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0]
-for b in [0.125, 2, 1, 0.5, 0.25, 0.0625]:
+for b in [4]:
     beta_f = {f.flight_id: b for f in flights}
     auction_params = qcarun.AuctionRunParams(flights=flights,
                                              connections=connections,
@@ -126,7 +126,7 @@ for b in [0.125, 2, 1, 0.5, 0.25, 0.0625]:
                                              kappa=kappa,
                                              delta=delta,
                                              monopoly_constraint_rate=monopoly_constraint_rate,
-                                             verbose=False,
+                                             verbose=True,
                                              max_iter=100,
                                              delay_threshold=0)
     results = qcarun.run_pricing_auction(auction_params)
